@@ -46,21 +46,29 @@ docs/
 ├── README.md                    # This overview document
 ├── configuration-guide.md       # Comprehensive PSM configuration guide
 ├── architecture/
-│   ├── component-diagram.md     # Detailed component relationships
-│   ├── data-flow.md            # Data flow and message passing
-│   └── threading-model.md      # Threading architecture
-├── components/
-│   ├── lease-monitor.md        # Lease monitoring system
-│   ├── main-controller.md      # Main controller logic
-│   ├── lease-handlers.md       # DHCPv4/v6 lease processing
-│   ├── recovery-handler.md     # Persistence and recovery
-│   └── mapt-apis.md           # MAP-T implementation
-└── api/
-    ├── controller-api.md       # Main controller APIs
-    ├── monitor-api.md         # Lease monitor APIs
-    ├── handlers-api.md        # Lease handler APIs
-    └── recovery-api.md        # Recovery handler APIs
+│   └── component-diagram.md     # Detailed component relationships and diagrams
+└── components/
+    ├── lease-monitor.md         # Lease monitoring system
+    ├── main-controller.md       # Main controller logic
+    ├── lease-handlers.md        # DHCPv4/v6 lease processing
+    ├── recovery-handler.md      # Persistence and recovery
+    └── mapt-apis.md            # MAP-T implementation
 ```
+
+## Documentation Links
+
+### 📋 Configuration & Setup
+- **[Configuration Guide](configuration-guide.md)** - Complete PSM parameter configuration with examples
+
+### 🏗️ Architecture Documentation  
+- **[Component Diagram](architecture/component-diagram.md)** - System architecture and component relationships
+
+### 🔧 Component Documentation
+- **[Lease Monitor](components/lease-monitor.md)** - IPC-based lease monitoring system
+- **[Main Controller](components/main-controller.md)** - Central coordination and client management
+- **[Lease Handlers](components/lease-handlers.md)** - DHCPv4/v6 lease processing logic
+- **[Recovery Handler](components/recovery-handler.md)** - Persistence and crash recovery
+- **[MAP-T APIs](components/mapt-apis.md)** - IPv4-over-IPv6 transition support
 
 ## Quick Start
 
@@ -117,79 +125,6 @@ dmsb.dhcpmanager
         ├── SentOptNoOfEntries          # Number of sent options
         ├── SentOption.{i}.Tag          # DHCPv6 option tag
         └── SentOption.{i}.Value        # Option value (hex-encoded)
-```
-
-### Quick Configuration Examples
-
-#### Basic DHCPv4 Client
-```xml
-<!-- Single DHCPv4 client for WAN interface -->
-<Record name="dmsb.dhcpmanager.ClientNoOfEntries" type="astr">1</Record>
-<Record name="dmsb.dhcpmanager.Client.1.Alias" type="astr">WAN_CLIENT</Record>
-
-<!-- Request standard options -->
-<Record name="dmsb.dhcpmanager.Client.1.ReqOptionNoOfEntries" type="astr">3</Record>
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.1.Tag" type="astr">1</Record>  <!-- Subnet Mask -->
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.1.Order" type="astr">1</Record>
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.2.Tag" type="astr">3</Record>  <!-- Router -->
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.2.Order" type="astr">2</Record>
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.3.Tag" type="astr">6</Record>  <!-- DNS Server -->
-<Record name="dmsb.dhcpmanager.Client.1.ReqOption.3.Order" type="astr">3</Record>
-
-<!-- Send vendor class identifier -->
-<Record name="dmsb.dhcpmanager.Client.1.SendOptionNoOfEntries" type="astr">1</Record>
-<Record name="dmsb.dhcpmanager.Client.1.SendOption.1.Tag" type="astr">60</Record>
-<Record name="dmsb.dhcpmanager.Client.1.SendOption.1.Value" type="astr">526F757465725F763100</Record>
-```
-
-#### Basic DHCPv6 Client
-```xml
-<!-- Single DHCPv6 client with address request -->
-<Record name="dmsb.dhcpmanager.dhcpv6.ClientNoOfEntries" type="astr">1</Record>
-<Record name="dmsb.dhcpmanager.dhcpv6.Client.1.Alias" type="astr">WAN_IPV6</Record>
-<Record name="dmsb.dhcpmanager.dhcpv6.Client.1.ReqAddr" type="astr">TRUE</Record>
-<Record name="dmsb.dhcpmanager.dhcpv6.Client.1.ReqPrefix" type="astr">FALSE</Record>
-<Record name="dmsb.dhcpmanager.dhcpv6.Client.1.RequestedOptions" type="astr">23,24</Record> <!-- DNS, Domain -->
-```
-
-#### WAN Manager Integration
-```xml
-<!-- Bind DHCP clients to WAN interfaces -->
-<Record name="dmsb.wanmanager.if.1.VirtualInterface.1.IP.DHCPV4Interface" type="astr">Device.DHCPv4.Client.1</Record>
-<Record name="dmsb.wanmanager.if.1.VirtualInterface.1.IP.DHCPV6Interface" type="astr">Device.DHCPv6.Client.1</Record>
-```
-
-### Custom Options Support
-
-The DHCP Manager supports custom vendor-specific options through:
-
-- **PSM Configuration**: Direct hex-encoded values in PSM parameters
-- **Custom APIs**: Dynamic value generation through custom libraries
-- **Weak/Strong Implementation**: Override default behavior with custom functions
-
-### Advanced Configuration
-
-For complex scenarios including:
-- Multiple WAN interfaces (Cable, Ethernet, LTE)
-- Vendor-specific option processing
-- MAP-T configuration
-- Enterprise deployments
-
-Refer to the comprehensive [Configuration Guide](configuration-guide.md) for detailed examples and best practices.
-
-### Configuration Validation
-
-```bash
-# Verify DHCP client configuration
-dmcli eRT getv Device.DHCPv4.Client.
-dmcli eRT getv Device.DHCPv6.Client.
-
-# Check WAN Manager bindings
-dmcli eRT getv Device.X_RDK_WanManager.Interface.
-
-# Validate option configuration
-dmcli eRT getv Device.DHCPv4.Client.1.ReqOption.
-dmcli eRT getv Device.DHCPv6.Client.1.SentOption.
 ```
 
 ## Core Components
@@ -294,4 +229,3 @@ When modifying the DHCP Client Manager:
 - [RFC 2131 - DHCP](https://tools.ietf.org/html/rfc2131)
 - [RFC 3315 - DHCPv6](https://tools.ietf.org/html/rfc3315)
 - [RFC 7599 - MAP-T](https://tools.ietf.org/html/rfc7599)
-- [RDK-B Documentation](https://rdkcentral.github.io/rdkb/)
