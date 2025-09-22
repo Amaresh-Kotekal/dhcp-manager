@@ -161,6 +161,7 @@ graph TB
     subgraph PROCESS [" "]
         direction TB
         MAIN[Main Thread]:::mainStyle
+        RBUS_T[RBUS Thread<br/>• TR-181 Operations<br/>• Client Enable/Disable<br/>• Configuration Updates]:::rbusStyle
         CONTROLLER_T[Controller Thread<br/>• Client Management<br/>• Lease Monitoring<br/>• Recovery Operations]:::coreStyle
     end
     
@@ -177,7 +178,13 @@ graph TB
     end
     
     %% Thread coordination
+    MAIN ==>|Initialize & Start| RBUS_T
     MAIN ==>|Initialize & Start| CONTROLLER_T
+    
+    %% RBUS to Controller communication
+    RBUS_T ==>|Enable/Disable Commands| CONTROLLER_T
+    RBUS_T -.->|Configuration Changes| CONTROLLER_T
+    CONTROLLER_T -.->|Status Updates| RBUS_T
     
     %% Process management
     CONTROLLER_T ==>|Spawn/Control| UDHCPC_P
@@ -196,6 +203,7 @@ graph TB
     
     %% Styling
     classDef mainStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:3px,color:#000
+    classDef rbusStyle fill:#fff8e1,stroke:#ff8f00,stroke-width:3px,color:#000
     classDef coreStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px,color:#000
     classDef clientStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
     classDef pluginStyle fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#000
@@ -208,18 +216,28 @@ graph TB
 
 #### Main Thread
 - **Initialization**: System startup and component initialization
-- **TR-181 Operations**: Handle data model operations
-- **RBUS Management**: Manage RBUS/DBUS communications
 - **Signal Handling**: Process system signals and shutdown
-- **Controller Startup**: Initialize and start the controller thread
+- **Thread Management**: Initialize and start RBUS and controller threads
+- **System Coordination**: Coordinate between different threads during startup/shutdown
+
+#### RBUS Thread
+The RBUS thread handles all TR-181 Data Model operations and external management interface:
+
+- **TR-181 Operations**: Handle all data model get/set operations
+- **RBUS Management**: Manage RBUS/DBUS communications and subscriptions
+- **Client Control Commands**: Process enable/disable commands for DHCP clients
+- **Configuration Management**: Handle configuration changes from external management
+- **Status Reporting**: Report client status and lease information to TR-181 data model
+- **Parameter Validation**: Validate configuration parameters before applying
+- **Event Notifications**: Generate TR-181 events for configuration and status changes
 
 #### Controller Thread
 The controller thread is the primary worker thread that handles all core DHCP management operations:
 
-- **Client Management**: Start/stop/configure DHCP clients
+- **Client Management**: Start/stop/configure DHCP clients based on RBUS commands
 - **Lease Processing**: Process lease updates from plugins via IPC
 - **State Monitoring**: Monitor interface and client states
-- **Configuration Updates**: Apply configuration changes
+- **Configuration Updates**: Apply configuration changes received from RBUS thread
 - **Recovery Operations**: Called as APIs before the main controller loop
   - Process health checking and restart operations
   - Lease recovery from persistent storage
