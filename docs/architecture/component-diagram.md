@@ -8,62 +8,95 @@ The DHCP Client Manager architecture is designed around a modular, event-driven 
 
 ```mermaid
 graph TB
-    subgraph "Application Layer"
-        TR181[TR-181 Data Model]
-        RBUS[RBUS/DBUS Interface]
-        MGMT[Management APIs]
+    %% Application Layer - Blue theme
+    subgraph APP [" "]
+        direction TB
+        TR181[TR-181 Data Model]:::appStyle
+        RBUS[RBUS/DBUS Interface]:::appStyle
+        MGMT[Management APIs]:::appStyle
     end
     
-    subgraph "DHCP Manager Core"
-        CONTROLLER[Main Controller]
-        MONITOR[Lease Monitor]
-        RECOVERY[Recovery Handler]
+    %% DHCP Manager Core - Green theme
+    subgraph CORE [" "]
+        direction TB
+        CONTROLLER[Main Controller]:::coreStyle
+        MONITOR[Lease Monitor]:::coreStyle
+        RECOVERY[Recovery Handler]:::coreStyle
     end
     
-    subgraph "Protocol Handlers"
-        V4HANDLER[DHCPv4 Handler]
-        V6HANDLER[DHCPv6 Handler]
-        MAPT[MAP-T Processor]
+    %% Protocol Handlers - Orange theme
+    subgraph HANDLERS [" "]
+        direction TB
+        V4HANDLER[DHCPv4 Handler]:::handlerStyle
+        V6HANDLER[DHCPv6 Handler]:::handlerStyle
+        MAPT[MAP-T Processor]:::handlerStyle
     end
     
-    subgraph "External Clients"
-        UDHCPC[udhcpc Client]
-        DIBBLER[dibbler Client]
-        V4PLUGIN[udhcpc Plugin]
-        V6PLUGIN[dibbler Plugin]
+    %% External Clients - Purple theme
+    subgraph CLIENTS [" "]
+        direction LR
+        subgraph V4CLIENT [" "]
+            UDHCPC[udhcpc Client]:::clientStyle
+            V4PLUGIN[udhcpc Plugin]:::pluginStyle
+        end
+        subgraph V6CLIENT [" "]
+            DIBBLER[dibbler Client]:::clientStyle
+            V6PLUGIN[dibbler Plugin]:::pluginStyle
+        end
     end
     
-    subgraph "System Integration"
-        NETIF[Network Interfaces]
-        SYSEVENT[System Events]
-        WAN[WAN Manager]
+    %% System Integration - Gray theme
+    subgraph SYSTEM [" "]
+        direction TB
+        NETIF[Network Interfaces]:::systemStyle
+        SYSEVENT[System Events]:::systemStyle
+        WAN[WAN Manager]:::systemStyle
     end
     
-    TR181 --> CONTROLLER
-    RBUS --> CONTROLLER
-    MGMT --> CONTROLLER
+    %% Main control flow - thick lines
+    TR181 -.->|Config| CONTROLLER
+    RBUS -.->|Commands| CONTROLLER
+    MGMT -.->|API Calls| CONTROLLER
     
-    CONTROLLER --> V4HANDLER
-    CONTROLLER --> V6HANDLER
-    CONTROLLER --> RECOVERY
+    %% Core coordination
+    CONTROLLER ==>|Control| V4HANDLER
+    CONTROLLER ==>|Control| V6HANDLER
+    CONTROLLER ==>|Monitor| RECOVERY
     
-    MONITOR --> CONTROLLER
-    V4PLUGIN --> MONITOR
-    V6PLUGIN --> MONITOR
+    %% Lease monitoring flow
+    MONITOR ==>|Lease Updates| CONTROLLER
+    V4PLUGIN -->|IPC| MONITOR
+    V6PLUGIN -->|IPC| MONITOR
     
-    V4HANDLER --> UDHCPC
-    V6HANDLER --> DIBBLER
-    V6HANDLER --> MAPT
+    %% Client management
+    V4HANDLER ==>|Start/Stop| UDHCPC
+    V6HANDLER ==>|Start/Stop| DIBBLER
+    V6HANDLER -->|Process| MAPT
     
-    UDHCPC --> V4PLUGIN
-    DIBBLER --> V6PLUGIN
+    %% Plugin execution
+    UDHCPC -->|Execute| V4PLUGIN
+    DIBBLER -->|Execute| V6PLUGIN
     
-    V4HANDLER --> NETIF
-    V6HANDLER --> NETIF
-    V4HANDLER --> SYSEVENT
-    V6HANDLER --> SYSEVENT
+    %% System integration
+    V4HANDLER -->|Configure| NETIF
+    V6HANDLER -->|Configure| NETIF
+    V4HANDLER -->|Notify| SYSEVENT
+    V6HANDLER -->|Notify| SYSEVENT
+    CONTROLLER -->|Status| WAN
     
-    CONTROLLER --> WAN
+    %% Styling
+    classDef appStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px,color:#000
+    classDef coreStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px,color:#000
+    classDef handlerStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    classDef clientStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef pluginStyle fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#000
+    classDef systemStyle fill:#f5f5f5,stroke:#616161,stroke-width:2px,color:#000
+    
+    %% Group styling
+    APP ~~~ CORE
+    CORE ~~~ HANDLERS
+    HANDLERS ~~~ CLIENTS
+    CLIENTS ~~~ SYSTEM
 ```
 
 
@@ -103,7 +136,6 @@ sequenceDiagram
     participant CONTROLLER as Main Controller
     participant CLIENT as DHCP Client
     participant PLUGIN as Client Plugin
-    participant MONITOR as Lease Monitor
     participant HANDLER as Lease Handler
     participant SYSTEM as System/Network
     
@@ -111,8 +143,8 @@ sequenceDiagram
     CONTROLLER->>CLIENT: Start/Configure Client
     CLIENT->>CLIENT: Acquire Lease
     CLIENT->>PLUGIN: Execute Plugin
-    PLUGIN->>MONITOR: Send Lease Info (IPC)
-    MONITOR->>CONTROLLER: Route Lease Data
+    PLUGIN->>CONTROLLER: Send Lease Info (IPC)
+    Note over CONTROLLER: IPC Monitoring<br/>handled internally
     CONTROLLER->>HANDLER: Process Lease
     HANDLER->>SYSTEM: Configure Network
     HANDLER->>CONFIG: Update TR-181 Status
@@ -125,30 +157,51 @@ sequenceDiagram
 
 ```mermaid
 graph TB
-    subgraph "Main Process"
-        MAIN[Main Thread]
-        CONTROLLER_T[Controller Thread]
-        MONITOR_T[Monitor Thread]
-        RECOVERY_T[Recovery Thread]
+    %% Main Process - Green theme
+    subgraph PROCESS [" "]
+        direction TB
+        MAIN[Main Thread]:::mainStyle
+        CONTROLLER_T[Controller Thread<br/>• Client Management<br/>• Lease Monitoring<br/>• Recovery Operations]:::coreStyle
     end
     
-    subgraph "External Processes"
-        UDHCPC_P[udhcpc Process]
-        DIBBLER_P[dibbler Process]
-        PLUGIN_P[Plugin Processes]
+    %% External Processes - Purple theme
+    subgraph EXTERNAL [" "]
+        direction LR
+        subgraph CLIENTS [" "]
+            UDHCPC_P[udhcpc Process]:::clientStyle
+            DIBBLER_P[dibbler Process]:::clientStyle
+        end
+        subgraph PLUGINS [" "]
+            PLUGIN_P[Plugin Processes]:::pluginStyle
+        end
     end
     
-    MAIN --> CONTROLLER_T
-    MAIN --> MONITOR_T
-    MAIN --> RECOVERY_T
+    %% Thread coordination
+    MAIN ==>|Initialize & Start| CONTROLLER_T
     
-    CONTROLLER_T --> UDHCPC_P
-    CONTROLLER_T --> DIBBLER_P
+    %% Process management
+    CONTROLLER_T ==>|Spawn/Control| UDHCPC_P
+    CONTROLLER_T ==>|Spawn/Control| DIBBLER_P
     
-    UDHCPC_P --> PLUGIN_P
-    DIBBLER_P --> PLUGIN_P
+    %% Plugin execution
+    UDHCPC_P -->|Execute| PLUGIN_P
+    DIBBLER_P -->|Execute| PLUGIN_P
     
-    PLUGIN_P --> MONITOR_T
+    %% IPC communication (handled by controller)
+    PLUGIN_P -->|IPC Messages| CONTROLLER_T
+    
+    %% Recovery operations (part of controller loop)
+    CONTROLLER_T -.->|Monitor/Recover| UDHCPC_P
+    CONTROLLER_T -.->|Monitor/Recover| DIBBLER_P
+    
+    %% Styling
+    classDef mainStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:3px,color:#000
+    classDef coreStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px,color:#000
+    classDef clientStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef pluginStyle fill:#ede7f6,stroke:#5e35b1,stroke-width:2px,color:#000
+    
+    %% Group spacing
+    PROCESS ~~~ EXTERNAL
 ```
 
 ### Thread Responsibilities
@@ -158,24 +211,23 @@ graph TB
 - **TR-181 Operations**: Handle data model operations
 - **RBUS Management**: Manage RBUS/DBUS communications
 - **Signal Handling**: Process system signals and shutdown
+- **Controller Startup**: Initialize and start the controller thread
 
 #### Controller Thread
+The controller thread is the primary worker thread that handles all core DHCP management operations:
+
 - **Client Management**: Start/stop/configure DHCP clients
-- **Lease Processing**: Process lease updates from monitor
+- **Lease Processing**: Process lease updates from plugins via IPC
 - **State Monitoring**: Monitor interface and client states
 - **Configuration Updates**: Apply configuration changes
-
-#### Monitor Thread
-- **IPC Listening**: Listen for plugin messages
-- **Message Processing**: Parse and validate lease messages
-- **Data Routing**: Route messages to controller
-- **Error Handling**: Handle communication errors
-
-#### Recovery Thread
-- **Process Monitoring**: Monitor DHCP client processes
-- **Health Checking**: Detect process failures
-- **Recovery Actions**: Restart failed clients
-- **Cleanup**: Remove dead process tracking
+- **Recovery Operations**: Called as APIs before the main controller loop
+  - Process health checking and restart operations
+  - Lease recovery from persistent storage
+  - System state restoration after crashes
+- **IPC Listening**: Listen for plugin messages on the IPC socket
+- **Message Processing**: Parse and validate lease messages from plugins
+- **Data Routing**: Route processed messages to appropriate handlers
+- **Error Handling**: Handle communication and operational errors
 
 ## Message Flow Patterns
 
@@ -229,39 +281,72 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph "Network Stack"
-        KERNEL[Kernel Network]
-        NETDEV[Network Devices]
-        ROUTES[Routing Table]
-        DNS[DNS Configuration]
+    %% Network Stack - Blue theme
+    subgraph STACK [" "]
+        direction TB
+        KERNEL[Kernel Network]:::kernelStyle
+        NETDEV[Network Devices]:::netStyle
+        ROUTES[Routing Table]:::netStyle
+        DNS[DNS Configuration]:::netStyle
     end
     
-    subgraph "DHCP Manager"
-        CONTROLLER[Controller]
-        V4HANDLER[DHCPv4 Handler]
-        V6HANDLER[DHCPv6 Handler]
+    %% DHCP Manager - Green theme (limited scope)
+    subgraph DHCP [" "]
+        direction TB
+        CONTROLLER[Controller]:::coreStyle
+        V4HANDLER[DHCPv4 Handler<br/>• Interface IP Config<br/>• Lease Processing]:::handlerStyle
+        V6HANDLER[DHCPv6 Handler<br/>• Interface IPv6 Config<br/>• Prefix Assignment]:::handlerStyle
     end
     
-    subgraph "System Integration"
-        SYSEVENT[System Events]
-        WAN[WAN Manager]
-        FIREWALL[Firewall]
-        ROUTING[Routing Daemon]
+    %% WAN Manager - Orange theme (system integration)
+    subgraph WAN_MGR [" "]
+        direction TB
+        WAN[WAN Manager<br/>• Default Routes<br/>• DNS Configuration<br/>• Firewall Rules]:::wanStyle
+        SYSEVENT[System Events]:::systemStyle
     end
     
-    CONTROLLER --> NETDEV
-    V4HANDLER --> NETDEV
-    V4HANDLER --> ROUTES
-    V4HANDLER --> DNS
-    V6HANDLER --> NETDEV
-    V6HANDLER --> ROUTES
-    V6HANDLER --> DNS
+    %% System Integration - Gray theme
+    subgraph INTEGRATION [" "]
+        direction TB
+        FIREWALL[Firewall]:::systemStyle
+        ROUTING[Routing Daemon]:::systemStyle
+    end
     
-    V4HANDLER --> SYSEVENT
-    V6HANDLER --> SYSEVENT
-    SYSEVENT --> WAN
-    SYSEVENT --> FIREWALL
-    SYSEVENT --> ROUTING
+    %% DHCP Manager - Interface only configuration
+    CONTROLLER ==>|Interface Control| NETDEV
+    V4HANDLER ==>|Configure Interface IP| NETDEV
+    V6HANDLER ==>|Configure Interface IPv6| NETDEV
+    
+    %% DHCP Manager - Lease status reporting
+    V4HANDLER -->|Lease Status| SYSEVENT
+    V6HANDLER -->|Lease Status| SYSEVENT
+    
+    %% WAN Manager - System configuration
+    WAN ==>|Default Routes| ROUTES
+    WAN ==>|DNS Servers| DNS
+    WAN ==>|Firewall Rules| FIREWALL
+    WAN -->|Route Updates| ROUTING
+    
+    %% Event-driven integration
+    SYSEVENT ==>|Lease Events| WAN
+    
+    %% Kernel interaction
+    NETDEV -.->|Interface State| KERNEL
+    ROUTES -.->|Kernel Routes| KERNEL
+    DNS -.->|Resolver Config| KERNEL
+    
+    %% Styling
+    classDef kernelStyle fill:#e8eaf6,stroke:#3f51b5,stroke-width:3px,color:#000
+    classDef netStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px,color:#000
+    classDef coreStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px,color:#000
+    classDef handlerStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px,color:#000
+    classDef wanStyle fill:#fff3e0,stroke:#f57c00,stroke-width:3px,color:#000
+    classDef systemStyle fill:#f5f5f5,stroke:#616161,stroke-width:2px,color:#000
+    
+    %% Group spacing
+    STACK ~~~ DHCP
+    DHCP ~~~ WAN_MGR
+    WAN_MGR ~~~ INTEGRATION
 ```
 
 ### TR-181 Integration Points
@@ -291,38 +376,65 @@ The DHCP Manager integrates with TR-181 at multiple levels:
 
 ```mermaid
 graph TB
-    subgraph "Privileged Context"
-        MANAGER[DHCP Manager]
-        CONTROLLER[Controller]
+    %% Privileged Context - Red theme (highest privilege)
+    subgraph PRIVILEGED [" "]
+        direction TB
+        MANAGER[DHCP Manager]:::privilegedStyle
+        CONTROLLER[Controller]:::privilegedStyle
     end
     
-    subgraph "Network Context"
-        UDHCPC[udhcpc Client]
-        DIBBLER[dibbler Client]
+    %% Network Context - Blue theme (network operations)
+    subgraph NETWORK [" "]
+        direction LR
+        UDHCPC[udhcpc Client]:::networkStyle
+        DIBBLER[dibbler Client]:::networkStyle
     end
     
-    subgraph "Plugin Context"
-        V4PLUGIN[udhcpc Plugin]
-        V6PLUGIN[dibbler Plugin]
+    %% Plugin Context - Purple theme (plugin execution)
+    subgraph PLUGIN [" "]
+        direction LR
+        V4PLUGIN[udhcpc Plugin]:::pluginStyle
+        V6PLUGIN[dibbler Plugin]:::pluginStyle
     end
     
-    subgraph "System Context"
-        NETCONFIG[Network Config]
-        FILESYSTEM[File System]
+    %% System Context - Orange theme (system resources)
+    subgraph SYSTEM [" "]
+        direction TB
+        NETCONFIG[Network Config]:::systemStyle
+        FILESYSTEM[File System]:::systemStyle
     end
     
-    MANAGER --> CONTROLLER
-    CONTROLLER --> UDHCPC
-    CONTROLLER --> DIBBLER
+    %% Control flows (privileged to network)
+    MANAGER ==>|Manage| CONTROLLER
+    CONTROLLER ==>|Control| UDHCPC
+    CONTROLLER ==>|Control| DIBBLER
     
-    UDHCPC --> V4PLUGIN
-    DIBBLER --> V6PLUGIN
+    %% Plugin execution flows
+    UDHCPC -->|Execute| V4PLUGIN
+    DIBBLER -->|Execute| V6PLUGIN
     
-    V4PLUGIN --> MANAGER
-    V6PLUGIN --> MANAGER
+    %% Plugin communication (isolated)
+    V4PLUGIN -.->|IPC| MANAGER
+    V6PLUGIN -.->|IPC| MANAGER
     
-    CONTROLLER --> NETCONFIG
-    CONTROLLER --> FILESYSTEM
+    %% System resource access (privileged only)
+    CONTROLLER ==>|Configure| NETCONFIG
+    CONTROLLER ==>|Persist| FILESYSTEM
+    
+    %% Security boundaries (dotted lines)
+    NETCONFIG -.->|Read-only| UDHCPC
+    NETCONFIG -.->|Read-only| DIBBLER
+    
+    %% Styling
+    classDef privilegedStyle fill:#ffebee,stroke:#c62828,stroke-width:3px,color:#000
+    classDef networkStyle fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#000
+    classDef pluginStyle fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#000
+    classDef systemStyle fill:#fff3e0,stroke:#f57c00,stroke-width:2px,color:#000
+    
+    %% Group spacing
+    PRIVILEGED ~~~ NETWORK
+    NETWORK ~~~ PLUGIN
+    PLUGIN ~~~ SYSTEM
 ```
 
 ## DHCP Protocol Sequences
@@ -338,10 +450,12 @@ The DHCPv4 sequence illustrates the interaction between the DHCP Manager, udhcpc
 1. **Client Initialization**: Main controller starts udhcpc client based on TR-181 configuration
 2. **DHCP Discovery**: udhcpc performs standard DHCP discovery process (DISCOVER/OFFER/REQUEST/ACK)
 3. **Plugin Execution**: Upon lease acquisition, udhcpc executes the plugin with lease information
-4. **IPC Communication**: Plugin sends lease data to the lease monitor via IPC
-5. **Lease Processing**: Controller processes the lease and updates system configuration
-6. **Network Configuration**: Interface is configured with IP address, routes, and DNS settings
-7. **Status Update**: TR-181 data model is updated with current lease information
+4. **IPC Communication**: Plugin sends lease data to the controller via IPC
+5. **Lease Processing**: Controller processes the lease and updates interface configuration
+6. **Interface Configuration**: Interface is configured with IP address and interface-specific settings
+7. **System Events**: Lease status events are sent to system for WAN Manager processing
+8. **WAN Manager Integration**: WAN Manager handles default routes, DNS, and firewall configuration
+9. **Status Update**: TR-181 data model is updated with current lease information
 
 ### DHCPv6 Sequence Flow
 
@@ -357,9 +471,10 @@ The DHCPv6 sequence demonstrates the more complex IPv6 lease acquisition process
 4. **Plugin Execution**: dibbler executes the plugin with comprehensive IPv6 lease information
 5. **IPC Communication**: Plugin sends detailed IPv6 lease data including addresses and prefixes
 6. **Lease Processing**: Controller processes both address assignments and prefix delegations
-7. **IPv6 Configuration**: Interface is configured with IPv6 addresses, prefixes, and routes
-8. **System Events**: IPv6-specific system events are generated for prefix delegation and addressing
-9. **Status Update**: TR-181 data model is updated with IPv6 lease information
+7. **Interface Configuration**: Interface is configured with IPv6 addresses and prefixes
+8. **System Events**: IPv6-specific lease events are generated for WAN Manager processing
+9. **WAN Manager Integration**: WAN Manager handles IPv6 default routes, DNS, and system configuration
+10. **Status Update**: TR-181 data model is updated with IPv6 lease information
 
 ## Extension Points
 
