@@ -33,6 +33,19 @@ DHCPManager acts as a controller and orchestrator for DHCP utilities and service
 •	In future versions, on the LAN side, DHCPManager starts and manages DHCPv4 and DHCPv6 servers to provide IP addresses and configuration to LAN clients connected to the RDKB gateway.
 •	This design ensures robust and dynamic DHCP handling across both WAN and LAN interfaces.
 
+📚 Documentation
+
+For comprehensive documentation including architecture details, configuration guides, and component specifications, see:
+
+**[📖 Complete Documentation](docs/README.md)**
+
+The documentation includes:
+- System architecture and component diagrams
+- Threading model and data flow patterns
+- Configuration guide with PSM parameters
+- Component-specific documentation
+- Integration with WAN Manager and TR-181
+
 🤝 Contribution Guidelines
 Contributions are welcome! To contribute:
 
