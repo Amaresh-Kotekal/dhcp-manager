@@ -257,6 +257,7 @@ static void ConfigureIpv6Sysevents(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
     char iana_t2[32] = {0};
     char iana_pretm[32] = {0};
     char iana_vldtm[32] = {0};
+    char ia_pd_prefix[56] = {0};
 
     //Do configure the sysevents only if prefix assigned
     if(pDhcp6c->currentLease->ia_pd.assigned)
@@ -267,9 +268,10 @@ static void ConfigureIpv6Sysevents(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
         snprintf(iapd_t2, sizeof(iapd_t2), "%u", pDhcp6c->currentLease->ia_pd.T2);
         snprintf(iapd_pretm, sizeof(iapd_pretm), "%u", pDhcp6c->currentLease->ia_pd.PreferedLifeTime);
         snprintf(iapd_vldtm, sizeof(iapd_vldtm), "%u", pDhcp6c->currentLease->ia_pd.ValidLifeTime);
+        snprintf(ia_pd_prefix,sizeof(ia_pd_prefix),"%s/%u",pDhcp6c->currentLease->ia_pd.Prefix,pDhcp6c->currentLease->ia_pd.PrefixLength);
 
         IPv6Events eventv6[] = {
-        {pDhcp6c->currentLease->ia_pd.Prefix, COSA_DML_WANIface_PREF_SYSEVENT_NAME},
+        {ia_pd_prefix, COSA_DML_WANIface_PREF_SYSEVENT_NAME},
         {iapd_iaid, COSA_DML_WANIface_PREF_IAID_SYSEVENT_NAME},
         {iapd_t1,   COSA_DML_WANIface_PREF_T1_SYSEVENT_NAME},
         {iapd_t2,   COSA_DML_WANIface_PREF_T2_SYSEVENT_NAME},
