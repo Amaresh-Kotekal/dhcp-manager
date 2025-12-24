@@ -50,6 +50,156 @@ typedef int (*CALLBACK_FUNC_NAME)(void *);
 extern ANSC_HANDLE bus_handle;
 extern char g_Subsystem[32];
 
+static interface_info_t interfaces[MAX_INTERFACES];
+static int interface_count = 0;
+static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Open existing or create new message queue */
+int create_message_queue(const char *alias_name, char mq_name_out[], mqd_t *mq_desc) {
+    struct mq_attr attr;
+    
+    /* Create queue name: /mq_if_<alias_name> */
+    snprintf(mq_name_out, MQ_NAME_LEN, "/mq_if_%s", alias_name);
+    printf("Creating/opening message queue with name: %s\n", mq_name_out);
+    
+    /* Try to open existing queue first */
+    mq_name_out[MQ_NAME_LEN - 1] = '\0';
+
+    /* Log the name we're passing to mq_open for diagnostics */
+    printf("Attempting mq_open for name: %s\n", mq_name_out);
+
+    *mq_desc = mq_open(mq_name_out, O_RDWR | O_NONBLOCK);
+    
+    if (*mq_desc != (mqd_t)-1) {
+        printf("Message queue %s already exists, opened successfully\n", mq_name_out);
+        return 0;
+    }
+    
+    /* Queue doesn't exist, create it */
+    printf("Creating new message queue %s\n", mq_name_out);
+    
+    /* Set queue attributes */
+    attr.mq_flags = 0;
+    attr.mq_maxmsg = MQ_MAX_MESSAGES;
+    attr.mq_msgsize = MQ_MSG_SIZE;
+    attr.mq_curmsgs = 0;
+
+    printf("Creating mq with attrs: maxmsg=%ld msgsize=%ld\n", (long)attr.mq_maxmsg, (long)attr.mq_msgsize);
+    *mq_desc = mq_open(mq_name_out, O_CREAT | O_RDWR | O_NONBLOCK, 0644, &attr);
+    
+    if (*mq_desc == (mqd_t)-1) {
+        perror("mq_open failed");
+        return -1;
+    }
+    
+    printf("Message queue %s created successfully\n", mq_name_out);
+    return 0;
+}
+
+
+/* Delete (close) a message queue */
+int delete_message_queue(mqd_t mq_desc) {
+    if (mq_close(mq_desc) == -1) {
+        perror("mq_close failed");
+        return -1;
+    }
+    
+    printf("Message queue closed successfully\n");
+    return 0;
+}
+
+/* Unlink a message queue */
+int unlink_message_queue(const char *mq_name) {
+    if (mq_unlink(mq_name) == -1) {
+        perror("mq_unlink failed");
+        return -1;
+    }
+    
+    printf("Message queue %s unlinked successfully\n", mq_name);
+    return 0;
+}
+
+
+/* Mark thread as stopped in the global array */
+int mark_thread_stopped(const char *alias_name) {
+    pthread_mutex_lock(&global_mutex);
+    
+    for (int i = 0; i < interface_count; i++) {
+        if (strcmp(interfaces[i].if_name, alias_name) == 0) {
+            interfaces[i].thread_running = false;
+            pthread_mutex_unlock(&global_mutex);
+            printf("Marked thread for %s as stopped\n", alias_name);
+            return 0;
+        }
+    }
+    
+    pthread_mutex_unlock(&global_mutex);
+    return -1;
+}
+
+int find_or_create_interface(const char *alias_name, interface_info_t *info_out) {
+    pthread_mutex_lock(&global_mutex);
+    
+    /* Check if interface already exists */
+    for (int i = 0; i < interface_count; i++) {
+        if (strcmp(interfaces[i].if_name, alias_name) == 0) {
+            pthread_mutex_unlock(&global_mutex);
+            memcpy(info_out, &interfaces[i], sizeof(interface_info_t));
+            return 0;
+        }
+    }
+    
+    /* Create new interface entry */
+    if (interface_count >= MAX_INTERFACES) {
+        fprintf(stderr, "Maximum number of interfaces reached\n");
+        pthread_mutex_unlock(&global_mutex);
+        return -1;
+    }
+    
+    interface_info_t *new_info = &interfaces[interface_count];
+    strncpy(new_info->if_name, alias_name, MAX_STR_LEN - 1);
+    new_info->if_name[MAX_STR_LEN - 1] = '\0';
+    new_info->thread_running = false;
+    new_info->mq_desc = (mqd_t)-1;
+    pthread_mutex_init(&new_info->mutex, NULL);
+    
+    interface_count++;
+    
+    pthread_mutex_unlock(&global_mutex);
+    memcpy(info_out, new_info, sizeof(interface_info_t));
+    return 0;
+}
+
+/* Create a thread for the interface */
+int create_interface_thread(char *info_ifName) {
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, DhcpMgr_MainController, info_ifName) != 0) {
+        perror("pthread_create failed");
+        return -1;
+    }
+    
+    pthread_detach(thread_id);
+    printf("Thread created for interface %s\n", info_ifName);
+//    pthread_join(thread_id, NULL);
+    return 0;
+}
+
+/* Update interface info in the global array */
+int update_interface_info(const char *alias_name, interface_info_t *info) {
+    pthread_mutex_lock(&global_mutex);
+    
+    for (int i = 0; i < interface_count; i++) {
+        if (strcmp(interfaces[i].if_name, alias_name) == 0) {
+            memcpy(&interfaces[i], info, sizeof(interface_info_t));
+            pthread_mutex_unlock(&global_mutex);
+            return 0;
+        }
+    }
+    
+    pthread_mutex_unlock(&global_mutex);
+    return -1;
+}
+
 #ifdef FEATURE_RDKB_WAN_MANAGER
 static ANSC_STATUS RdkBus_GetParamValues( char *pComponent, char *pBus, char *pParamName, char *pReturnVal )
 {
@@ -999,3 +1149,6 @@ INT PsmReadParameter( char *pParamName, char *pReturnVal, int returnValLength )
     return retPsmGet;
 }
 #endif //DHCPV6C_PSM_ENABLE
+
+
+

@@ -38,6 +38,7 @@
 #include "dhcpv6_interface.h"
 #include "dhcpmgr_controller.h"
 #include "dhcp_lease_monitor_thrd.h"
+#include "cosa_apis_util.h"
 
 static int ipcListenFd = 0;
 
@@ -116,6 +117,34 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                     newLease->next = NULL;
                     DHCPMGR_LOG_INFO("[%s-%d] Processing DHCPv4 lease for interface: %s\n",__FUNCTION__, __LINE__, plugin_msg.ifname);
                     DHCPMgr_AddDhcpv4Lease(plugin_msg.ifname, newLease);
+
+                    // Send the lease to the Controller via message queue
+                    char mq_name[MAX_STR_LEN];
+                    snprintf(mq_name, sizeof(mq_name), "mq_if_%s", plugin_msg.ifname);
+
+                    // Open the message queue
+                    mqd_t mq_desc = mq_open(mq_name, O_WRONLY | O_NONBLOCK);
+                    if (mq_desc == (mqd_t)-1) {
+                        DHCPMGR_LOG_ERROR("[%s-%d] Failed to open message queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                    } else {
+                        interface_info_t info;
+                        memset(&info, 0, sizeof(interface_info_t));
+                        strncpy(info.if_name, plugin_msg.ifname, MAX_STR_LEN - 1);
+                        strncpy(info.mq_name, mq_name, MAX_STR_LEN - 1);
+                        info.thread_running = TRUE;
+                        info.mq_desc = mq_desc;
+                        info.msg.dhcpType = DML_DHCPV4;
+                        strcpy(info.msg.ParamName, "ProcessLease");
+
+                        
+                        if (mq_send(info.mq_desc,(char*) &info, sizeof(info), 0) == -1) {
+                            DHCPMGR_LOG_ERROR("[%s-%d] Failed to send message to queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                        } else {
+                            DHCPMGR_LOG_INFO("[%s-%d] Successfully sent DHCPv4 lease to controller queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                        }
+                        mq_close(mq_desc);
+                    }
+                    
                     break;
                 }
                 case DHCP_VERSION_6:
@@ -125,6 +154,30 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                     newLeasev6->next = NULL;
                     DHCPMGR_LOG_INFO("[%s-%d] Processing DHCPv6  lease for interface: %s\n",__FUNCTION__, __LINE__, plugin_msg.ifname);
                     DHCPMgr_AddDhcpv6Lease(plugin_msg.ifname, newLeasev6);
+
+                    // Send the lease to the Controller via message queue
+                    char mq_name[MAX_STR_LEN];
+                    snprintf(mq_name, sizeof(mq_name), "mq_if_%s", plugin_msg.ifname);  
+                    // Open the message queue
+                    mqd_t mq_desc = mq_open(mq_name, O_WRONLY | O_NONBLOCK);
+                    if (mq_desc == (mqd_t)-1) {
+                        DHCPMGR_LOG_ERROR("[%s-%d] Failed to open message queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                    } else {
+                        interface_info_t info;
+                        memset(&info, 0, sizeof(interface_info_t));
+                        strncpy(info.if_name, plugin_msg.ifname, MAX_STR_LEN - 1);
+                        strncpy(info.mq_name, mq_name, MAX_STR_LEN - 1);
+                        info.thread_running = TRUE;
+                        info.mq_desc = mq_desc;
+                        info.msg.dhcpType = DML_DHCPV6;
+                        strcpy(info.msg.ParamName, "ProcessLease");
+                        if (mq_send(info.mq_desc,(char*) &info, sizeof(info), 0) == -1) {
+                            DHCPMGR_LOG_ERROR("[%s-%d] Failed to send message to queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                        } else {
+                            DHCPMGR_LOG_INFO("[%s-%d] Successfully sent DHCPv6 lease to controller queue %s\n", __FUNCTION__, __LINE__, mq_name);
+                        }
+                        mq_close(mq_desc);
+                    }
                     break;
                 }
                 default:

@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <mqueue.h>
 #include "util.h"
 #include "ansc_platform.h"
 #include "cosa_apis.h"
@@ -42,11 +43,12 @@
 #include "cosa_apis.h"
 #include "dhcpmgr_recovery_handler.h"
 #include "dhcpmgr_custom_options.h"
+#include "cosa_apis_util.h"
 
 
 /* ---- Global Constants -------------------------- */
 
-static void* DhcpMgr_MainController( void *arg );
+//static void* DhcpMgr_MainController( void *arg );
 
 /**
  * @brief Starts the main controller thread.
@@ -57,10 +59,36 @@ static void* DhcpMgr_MainController( void *arg );
  */
 int DhcpMgr_StartMainController()
 {
-    pthread_t threadId;
+//    pthread_t threadId;
     int ret = -1;
 
-    ret = pthread_create( &threadId, NULL, &DhcpMgr_MainController, NULL );
+    const char *filename = "/tmp/dhcpmanager_restarted";
+    int retStatus = 0;
+
+    if(access(filename, F_OK) != -1)
+    {
+        retStatus = DhcpMgr_Dhcp_Recovery_Start();
+        if(retStatus != 0)
+        {
+            DHCPMGR_LOG_ERROR("%s %d - Failed to start dhcp recovery thread\n", __FUNCTION__, __LINE__);
+        }
+        else
+        {
+            DHCPMGR_LOG_INFO("%s %d - Dhcp crash recovery thread started successfully\n", __FUNCTION__, __LINE__);
+            if (remove(filename) != 0)
+            {
+                DHCPMGR_LOG_ERROR("%s %d Error deleting %s file\n", __FUNCTION__, __LINE__, filename);
+            }
+        }
+    }
+
+    retStatus = DhcpMgr_LeaseMonitor_Start();
+    if(retStatus < 0)
+    {
+        DHCPMGR_LOG_INFO("%s %d - Lease Monitor Thread failed to start!\n", __FUNCTION__, __LINE__ );
+    }
+
+/*    ret = pthread_create( &threadId, NULL, &DhcpMgr_MainController, NULL );
 
     if( 0 != ret )
     {
@@ -70,7 +98,7 @@ int DhcpMgr_StartMainController()
     {
         DHCPMGR_LOG_INFO("%s %d - Main Controller Thread Started Successfully\n", __FUNCTION__, __LINE__);
         ret = 0;
-    }
+    } */
 
     return ret;
 }
@@ -412,64 +440,24 @@ static bool DhcpMgr_checkLinkLocalAddress(const char * interfaceName)
     return TRUE;
 }
 
-static void* DhcpMgr_MainController( void *args )
+static void Process_DHCP_Handler(interface_info_t info)
 {
-    (void) args;
-    //detach thread from caller stack
-    pthread_detach(pthread_self());
+    DHCPMGR_LOG_INFO("%s %d: Processing DHCP Handler for MQ:ParamName: %s and DHCPType=%d \n", __FUNCTION__, __LINE__, info.msg.ParamName, info.msg.dhcpType);
 
-    DHCPMGR_LOG_INFO("%s %d DhcpMgr_MainController started \n", __FUNCTION__, __LINE__);
-    BOOL bRunning = TRUE;
-    struct timeval tv;
-    int n = 0;
-    const char *filename = "/tmp/dhcpmanager_restarted";
-    int retStatus = 0;
+    PCOSA_CONTEXT_DHCPC_LINK_OBJECT pDhcpCxtLink  = NULL;
+    PSINGLE_LINK_ENTRY              pSListEntry   = NULL;
+    ULONG ulIndex;
+    ULONG instanceNum;
+    ULONG clientCount;
 
-    if(access(filename, F_OK) != -1)
+    if(info.msg.dhcpType == DML_DHCPV4)
     {
-        retStatus = DhcpMgr_Dhcp_Recovery_Start();
-        if(retStatus != 0)
-        {
-            DHCPMGR_LOG_ERROR("%s %d - Failed to start dhcp recovery thread\n", __FUNCTION__, __LINE__);
-        }
-        else
-        {
-            DHCPMGR_LOG_INFO("%s %d - Dhcp crash recovery thread started successfully\n", __FUNCTION__, __LINE__);
-            if (remove(filename) != 0)
-            {
-                DHCPMGR_LOG_ERROR("%s %d Error deleting %s file\n", __FUNCTION__, __LINE__, filename);
-            }
-        }
-    }
-
-    retStatus = DhcpMgr_LeaseMonitor_Start();
-    if(retStatus < 0)
-    {
-        DHCPMGR_LOG_INFO("%s %d - Lease Monitor Thread failed to start!\n", __FUNCTION__, __LINE__ );
-    }
-
-    while (bRunning)
-    {
-        /* Wait up to 250 milliseconds */
-        tv.tv_sec = 0;
-        tv.tv_usec = 250000;
-        //TODO : add a Signaling mechanism instead of sleep.
-        n = select(0, NULL, NULL, NULL, &tv);
-        if (n < 0)
-        {
-            /* interrupted by signal or something, continue */
-            continue;
-        }
-
-        //DHCPv4 client entries
-        //TODO : implement a internal DHCP structures and APIs, replace COSA APIs
+        /********************************************* DHCPv4 Handling ********************************************* */   
+            //DHCPv4 client entries
+    //TODO : implement a internal DHCP structures and APIs, replace COSA APIs
         PCOSA_DML_DHCPC_FULL            pDhcpc        = NULL;
-        PCOSA_CONTEXT_DHCPC_LINK_OBJECT pDhcpCxtLink  = NULL;
-        PSINGLE_LINK_ENTRY              pSListEntry   = NULL;
-        ULONG ulIndex;
-        ULONG instanceNum;
-        ULONG clientCount = CosaDmlDhcpcGetNumberOfEntries(NULL);
 
+        clientCount = CosaDmlDhcpcGetNumberOfEntries(NULL);
         for ( ulIndex = 0; ulIndex < clientCount; ulIndex++ )
         {
             pSListEntry = (PSINGLE_LINK_ENTRY)Client_GetEntry(NULL,ulIndex,&instanceNum);
@@ -486,8 +474,39 @@ static void* DhcpMgr_MainController( void *args )
             }
             
             pthread_mutex_lock(&pDhcpc->mutex); //MUTEX lock
+            if(strncmp(pDhcpc->Cfg.Interface, info.if_name, sizeof(pDhcpc->Cfg.Interface)) == 0)
+            {
+                DHCPMGR_LOG_INFO("%s %d: Found matching interface %s for MQ %s\n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface, info.if_name);
+                if (strcmp(info.msg.ParamName, "Enable") == 0 )
+                {
+                    pDhcpc->Cfg.bEnabled = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "Renew") == 0 ) 
+                {
+                    pDhcpc->Cfg.Renew = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "Restart") == 0 )
+                {
+                    pDhcpc->Cfg.Restart = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "ProcessLease") == 0 )
+                {
+                    DhcpMgr_ProcessV4Lease(pDhcpc);
+                }
+                else
+                { 
+                    DHCPMGR_LOG_ERROR("%s %d: Unknown ParamName %s received in MQ\n", __FUNCTION__, __LINE__, info.msg.ParamName); 
+                }
+            }
+            else
+            {
+                DHCPMGR_LOG_INFO("%s %d: No matching interface %s for MQ\n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface);
+                continue;
+            }
+
             if(pDhcpc->Cfg.bEnabled == TRUE )
             {
+                DHCPMGR_LOG_INFO("%s %d: DHCP client is enabled for interface %d\n",__FUNCTION__, __LINE__, pDhcpc->Info.Status);
                 if(pDhcpc->Info.Status == COSA_DML_DHCP_STATUS_Disabled)
                 {
                     ////DHCP client Enabled, start the client if not started.
@@ -541,7 +560,7 @@ static void* DhcpMgr_MainController( void *args )
                 }
                 
                 //Process new lease
-                DhcpMgr_ProcessV4Lease(pDhcpc);
+ //               DhcpMgr_ProcessV4Lease(pDhcpc);
             }
             else
             {
@@ -563,8 +582,10 @@ static void* DhcpMgr_MainController( void *args )
             pthread_mutex_unlock(&pDhcpc->mutex); //MUTEX unlock
 
         }
+    }
 
-
+    if(info.msg.dhcpType == DML_DHCPV6)
+    {
         /********************************************* DHCPv6 Handling ********************************************* */
        		//DHCPv6 client entries
         //TODO : implement a internal DHCP structures and APIs, replace COSA APIs
@@ -591,6 +612,37 @@ static void* DhcpMgr_MainController( void *args )
             }
             
             pthread_mutex_lock(&pDhcp6c->mutex); //MUTEX lock
+
+            if(strncmp(pDhcp6c->Cfg.Interface, info.if_name, sizeof(pDhcp6c->Cfg.Interface)) == 0)
+            {
+                DHCPMGR_LOG_INFO("%s %d: Found matching interface %s for MQ %s\n", __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface, info.if_name);
+                if (strcmp(info.msg.ParamName, "Enable") == 0 )
+                {
+                    pDhcp6c->Cfg.bEnabled = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "Renew") == 0 ) 
+                {
+                    pDhcp6c->Cfg.Renew = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "Restart") == 0 )
+                {
+                    pDhcp6c->Cfg.Restart = info.msg.value.bValue;
+                }
+                else if (strcmp(info.msg.ParamName, "ProcessLease") == 0 )
+                {
+                    DhcpMgr_ProcessV6Lease(pDhcp6c);
+                }
+                else
+                { 
+                    DHCPMGR_LOG_ERROR("%s %d: Unknown ParamName %s received in MQ\n", __FUNCTION__, __LINE__, info.msg.ParamName); 
+                }
+            }
+            else
+            {
+                DHCPMGR_LOG_INFO("%s %d: No matching interface %s for MQ\n", __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
+                continue;
+            }
+
             if(pDhcp6c->Cfg.bEnabled == TRUE )
             {
                 if(pDhcp6c->Info.Status == COSA_DML_DHCP_STATUS_Disabled)
@@ -652,7 +704,7 @@ static void* DhcpMgr_MainController( void *args )
                 }
 
                 //Process new lease
-                DhcpMgr_ProcessV6Lease(pDhcp6c);
+//                DhcpMgr_ProcessV6Lease(pDhcp6c);
             }
             else
             {
@@ -675,6 +727,82 @@ static void* DhcpMgr_MainController( void *args )
 
         }
     }
+}
+
+void* DhcpMgr_MainController( void *args )
+{
+//    (void) args;
+    //detach thread from caller stack
+    pthread_detach(pthread_self());
+    mqd_t mq_desc;
+    struct timespec timeout;
+    ssize_t bytes_read;
+    interface_info_t info;
+    char mq_name[MQ_NAME_LEN] = {0};
+
+    if(args != NULL)
+    {
+        memcpy(mq_name, (char *)args, MQ_NAME_LEN);
+    }
+    else
+    {
+        DHCPMGR_LOG_INFO("%s %d InValid Argument to the Controller Thread\n",__FUNCTION__,__LINE__);
+        return NULL;
+    }
+
+    DHCPMGR_LOG_INFO("%s %d DhcpMgr_MainController started \n", __FUNCTION__, __LINE__);
+
+    mq_desc = mq_open(info.mq_name, O_RDONLY);
+    if (mq_desc == (mqd_t)-1) {
+        DHCPMGR_LOG_ERROR("%s %d: mq_open failed in thread", __FUNCTION__, __LINE__);
+        return NULL;
+    }
+
+    DHCPMGR_LOG_INFO("%s %d: Message queue %s opened successfully\n", __FUNCTION__, __LINE__, info.mq_name);
+
+    while (1)
+    {
+        DHCPMGR_LOG_INFO("%s %d: Main controller loop iteration started\n", __FUNCTION__, __LINE__);
+        
+    /* Set timeout for 10s */
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timeout.tv_sec += 10;
+
+        memset(&info, 0, sizeof(interface_info_t));
+        /* Try to receive message with 900ms timeout */
+        bytes_read = mq_timedreceive(mq_desc,(char*) &info, sizeof(info), NULL, &timeout);
+         if (bytes_read == -1) 
+         {
+            if (errno == ETIMEDOUT) 
+            {
+                DHCPMGR_LOG_INFO("%s %d Thread for %s: No messages for 10s, draining queue before exit...\n", __FUNCTION__, __LINE__, info.mq_name);
+                
+                memset(&info, 0, sizeof(interface_info_t));
+                /* Drain all pending messages that may have arrived */
+                while ((bytes_read = mq_receive(mq_desc, (char*) &info, sizeof(info), NULL)) != -1) {
+                    DHCPMGR_LOG_INFO("%s %d Thread for %s: Drained pending message from queue\n", __FUNCTION__, __LINE__, info.mq_name);
+                    Process_DHCP_Handler(info);
+                }
+                
+                DHCPMGR_LOG_INFO("%s %d Thread for %s: Queue drained, exiting...\n", __FUNCTION__, __LINE__, info.mq_name);
+                break;
+            } 
+            else 
+            {
+                DHCPMGR_LOG_ERROR("%s %d: mq_timedreceive failed", __FUNCTION__, __LINE__);
+                break;
+            }
+        }
+        Process_DHCP_Handler(info);
+        DHCPMGR_LOG_INFO("%s %d Thread for %s: Message processed, waiting for next message...\n", __FUNCTION__, __LINE__, info.mq_name);
+    }
+        /* Cleanup before exiting */
+    printf("Thread for %s exiting and cleaning up...\n", info.if_name);
+    
+    mq_close(mq_desc);
+    
+    /* Mark thread as stopped so new one can be created if needed */
+    mark_thread_stopped(info.if_name);
     return NULL;
 
 }
