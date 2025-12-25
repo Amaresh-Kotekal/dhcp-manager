@@ -1106,6 +1106,7 @@ Client3_SetParamBoolValue
                 DHCPMGR_LOG_ERROR("%s %d: Failed to send status to interface queue %s\n", __FUNCTION__, __LINE__, info.mq_name);
             } else {
                 DHCPMGR_LOG_INFO("%s %d: Status sent to interface queue %s\n", __FUNCTION__, __LINE__, info.mq_name);
+                return TRUE;
             }
         } else {
             DHCPMGR_LOG_ERROR("%s %d: Failed to find/create interface %s\n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface);

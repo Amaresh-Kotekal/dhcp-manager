@@ -740,8 +740,8 @@ void* DhcpMgr_MainController( void *args )
     interface_info_t info;
     char mq_name[MQ_NAME_LEN] = {0};
 
-    DHCPMGR_LOG_INFO("%s %d: Entered with arg %s\n",__FUNCTION__, __LINE__, (char *)args);
-    if(args != NULL)
+    DHCPMGR_LOG_INFO("%s %d: Entered with arg %s\n",__FUNCTION__, __LINE__, (char*)args);
+    if(args != NULL && strcmp((char *)args, "mq_if_erouter0") != 0)
     {
         strncpy(mq_name, (char *)args, MQ_NAME_LEN);
     }
@@ -784,7 +784,7 @@ void* DhcpMgr_MainController( void *args )
                 
                 memset(&info, 0, sizeof(interface_info_t));
                 /* Drain all pending messages that may have arrived */
-                while ((bytes_read = mq_receive(mq_desc, (char*) &info, sizeof(info), NULL)) != -1) {
+                while ((bytes_read = mq_receive(mq_desc, (char*) &info, sizeof(interface_info_t), NULL)) != -1) {
                     DHCPMGR_LOG_INFO("%s %d Thread for %s: Drained pending message from queue\n", __FUNCTION__, __LINE__, info.mq_name);
                     Process_DHCP_Handler(info);
                 }

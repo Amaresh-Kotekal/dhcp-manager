@@ -181,12 +181,12 @@ INT PsmWriteParameter( char *pParamName, char *pParamVal );
 INT PsmReadParameter( char *pParamName, char *pReturnVal, int returnValLength );
 
 typedef struct dml_set_msg_s {
-    char ParamName[MAX_STR_SIZE];
+    char ParamName[MAX_STR_LEN];
     union {
         BOOL bValue;
         int iValue;
         ULONG uValue;
-        char strValue[MAX_STR_SIZE];
+        char strValue[MAX_STR_LEN];
     } value;
     enum {
         DML_SET_MSG_TYPE_BOOL,

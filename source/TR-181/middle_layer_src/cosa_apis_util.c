@@ -81,7 +81,7 @@ int create_message_queue(const char *alias_name, char mq_name_out[], mqd_t *mq_d
     /* Set queue attributes */
     attr.mq_flags = 0;
     attr.mq_maxmsg = MQ_MAX_MESSAGES;
-    attr.mq_msgsize = MQ_MSG_SIZE;
+    attr.mq_msgsize = sizeof(interface_info_t);
     attr.mq_curmsgs = 0;
 
     DHCPMGR_LOG_INFO("%s %d Creating mq with attrs: maxmsg=%ld msgsize=%ld\n", __FUNCTION__, __LINE__, (long)attr.mq_maxmsg, (long)attr.mq_msgsize);
