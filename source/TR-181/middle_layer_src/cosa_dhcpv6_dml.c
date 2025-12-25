@@ -996,7 +996,7 @@ Client3_SetParamBoolValue
         pthread_mutex_unlock(&pDhcpc->mutex); //MUTEX unlock */
         ret_mq_send=1;
 
-        return TRUE;
+//        return TRUE;
     }
 
     if (strcmp(ParamName, "RequestAddresses") == 0)

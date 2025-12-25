@@ -107,6 +107,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
         bytes = nn_recv(ipcListenFd, (PLUGIN_MSG *)&plugin_msg, msg_size, 0);
         if (bytes == msg_size)
         {
+            DHCPMGR_LOG_INFO("[%s-%d] Received message of size %d\n", __FUNCTION__, __LINE__, plugin_msg.version);
            //DHCPMGR_LOG_INFO("[%s-%d] Received valid message of size %d\n", __FUNCTION__, __LINE__, bytes);
             switch (plugin_msg.version)
             {
@@ -121,7 +122,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                     // Send the lease to the Controller via message queue
                     char mq_name[MAX_STR_LEN];
                     snprintf(mq_name, sizeof(mq_name), "mq_if_%s", plugin_msg.ifname);
-
+                    DHCPMGR_LOG_INFO("[%s-%d] Attempting to open message queue %s\n", __FUNCTION__, __LINE__, mq_name);
                     // Open the message queue
                     mqd_t mq_desc = mq_open(mq_name, O_WRONLY | O_NONBLOCK);
                     if (mq_desc == (mqd_t)-1) {
@@ -158,6 +159,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                     // Send the lease to the Controller via message queue
                     char mq_name[MAX_STR_LEN];
                     snprintf(mq_name, sizeof(mq_name), "mq_if_%s", plugin_msg.ifname);  
+                    DHCPMGR_LOG_INFO("[%s-%d] Attempting to open message queue %s\n", __FUNCTION__, __LINE__, mq_name);
                     // Open the message queue
                     mqd_t mq_desc = mq_open(mq_name, O_WRONLY | O_NONBLOCK);
                     if (mq_desc == (mqd_t)-1) {

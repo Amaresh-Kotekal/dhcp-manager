@@ -770,8 +770,12 @@ void* DhcpMgr_MainController( void *args )
         timeout.tv_sec += 10;
 
         memset(&info, 0, sizeof(interface_info_t));
+        DHCPMGR_LOG_INFO("%s %d: Waiting to receive message from queue %s\n", __FUNCTION__, __LINE__, mq_name);
+        sleep(5); //testcode
+        DHCPMGR_LOG_INFO("%s %d: Woke up from sleep, attempting to receive message\n", __FUNCTION__, __LINE__);
         /* Try to receive message with 900ms timeout */
         bytes_read = mq_timedreceive(mq_desc,(char*) &info, sizeof(info), NULL, &timeout);
+        DHCPMGR_LOG_INFO("%s %d: mq_timedreceive returned with bytes_read=%zd\n", __FUNCTION__, __LINE__, bytes_read);
          if (bytes_read == -1) 
          {
             if (errno == ETIMEDOUT) 
@@ -787,7 +791,30 @@ void* DhcpMgr_MainController( void *args )
                 
                 DHCPMGR_LOG_INFO("%s %d Thread for %s: Queue drained, exiting...\n", __FUNCTION__, __LINE__, info.mq_name);
                 break;
-            } 
+            }
+            else if (errno == EINTR) 
+            {
+                DHCPMGR_LOG_INFO("%s %d: mq_timedreceive interrupted by signal, retrying...\n", __FUNCTION__, __LINE__);
+            }
+            else if (errno == EAGAIN) 
+            {
+                DHCPMGR_LOG_INFO("%s %d: mq_timedreceive would block, no messages available\n", __FUNCTION__, __LINE__);
+            }
+            else if (errno == EBADF) 
+            {
+                DHCPMGR_LOG_ERROR("%s %d: mq_timedreceive failed - invalid message queue descriptor\n", __FUNCTION__, __LINE__);
+                break;
+            }
+            else if (errno == EMSGSIZE) 
+            {
+                DHCPMGR_LOG_ERROR("%s %d: mq_timedreceive failed - message size exceeds buffer size\n", __FUNCTION__, __LINE__);
+                break;
+            }
+            else if (errno == EINVAL) 
+            {
+                DHCPMGR_LOG_ERROR("%s %d: mq_timedreceive failed - invalid attributes\n", __FUNCTION__, __LINE__);
+                break;
+            }
             else 
             {
                 DHCPMGR_LOG_ERROR("%s %d: mq_timedreceive failed", __FUNCTION__, __LINE__);
