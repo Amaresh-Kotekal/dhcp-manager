@@ -158,7 +158,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
 
                     // Send the lease to the Controller via message queue
                     char mq_name[MAX_STR_LEN];
-                    snprintf(mq_name, sizeof(mq_name), "mq_if_%s", plugin_msg.ifname);  
+                    snprintf(mq_name, sizeof(mq_name), "/mq_if_%s", plugin_msg.ifname);  
                     DHCPMGR_LOG_INFO("[%s-%d] Attempting to open message queue %s\n", __FUNCTION__, __LINE__, mq_name);
                     // Open the message queue
                     mqd_t mq_desc = mq_open(mq_name, O_WRONLY | O_NONBLOCK);
