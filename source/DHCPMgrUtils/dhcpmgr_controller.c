@@ -576,6 +576,7 @@ static void Process_DHCP_Handler(interface_info_t info)
                     DhcpMgr_clearDHCPv4Lease(pDhcpc);
                     remove_dhcp_lease_file(pDhcpc->Cfg.InstanceNumber,DHCP_v4);
                     DhcpMgr_PublishDhcpV4Event(pDhcpc, DHCP_CLIENT_STOPPED);
+                    sleep(2);
                 }
             }
 
@@ -677,6 +678,7 @@ static void Process_DHCP_Handler(interface_info_t info)
                             pDhcp6c->Info.Status = COSA_DML_DHCP_STATUS_Enabled;
                             DHCPMGR_LOG_INFO("%s %d: dhcpv6 client for %s started PID : %d \n", __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface, pDhcp6c->Info.ClientProcessId);
                             DhcpMgr_PublishDhcpV6Event(pDhcp6c, DHCP_CLIENT_STARTED);
+                            sleep(2);
                         }
                         else
                         {
@@ -701,6 +703,7 @@ static void Process_DHCP_Handler(interface_info_t info)
                     pDhcp6c->Cfg.Restart = FALSE;
                     DhcpMgr_PublishDhcpV6Event(pDhcp6c, DHCP_LEASE_DEL);
                     DhcpMgr_clearDHCPv6Lease(pDhcp6c);
+                    sleep(2);
                 }
 
                 //Process new lease
