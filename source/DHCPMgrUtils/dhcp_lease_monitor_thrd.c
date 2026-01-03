@@ -138,7 +138,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                         strncpy(info.mq_name, mq_name, MAX_STR_LEN - 1);
                         info.thread_running = TRUE;
                         info.mq_desc = mq_desc;
-                        info.msg.dhcpType = DML_DHCPV4;
+                        info.dhcpType = DML_DHCPV4;
                         strcpy(info.msg.ParamName, "ProcessLease");
                         
                         if (mq_send(info.mq_desc,(char*) &info, sizeof(info), 0) == -1) 
@@ -204,7 +204,7 @@ static void* DhcpMgr_LeaseMonitor_Thrd(void *arg)
                         strncpy(info.mq_name, mq_name, MAX_STR_LEN - 1);
                         info.thread_running = TRUE;
                         info.mq_desc = mq_desc;
-                        info.msg.dhcpType = DML_DHCPV6;
+                        info.dhcpType = DML_DHCPV6;
                         strcpy(info.msg.ParamName, "ProcessLease");
                         if (mq_send(info.mq_desc,(char*) &info, sizeof(info), 0) == -1) 
                         {
