@@ -20,6 +20,8 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
+#include <errno.h>
+#include <mqueue.h>
 #include <syscfg/syscfg.h>
 #include "sysevent/sysevent.h"
 #include "utapi/utapi.h"
@@ -227,7 +229,21 @@ int DhcpMgr_OpenQueueEnsureThread(interface_info_t *info)
     if (mq_desc == (mqd_t)-1)
     {
         DHCPMGR_LOG_ERROR("%s %d Failed to open message queue %s\n", __FUNCTION__, __LINE__, info->mq_name);
-        return -1;
+        // Try to create the queue if it doesn't exist
+        char created_name[MQ_NAME_LEN] = {0};
+        mqd_t created_desc = (mqd_t)-1;
+        if (create_message_queue(info->if_name, created_name, &created_desc) == 0)
+        {
+            // Use the newly created descriptor for sending
+            strncpy(info->mq_name, created_name, sizeof(info->mq_name) - 1);
+            mq_desc = created_desc;
+            DHCPMGR_LOG_INFO("%s %d Created message queue %s successfully\n", __FUNCTION__, __LINE__, info->mq_name);
+        }
+        else
+        {
+            DHCPMGR_LOG_ERROR("%s %d Unable to create message queue %s\n", __FUNCTION__, __LINE__, info->mq_name);
+            return -1;
+        }
     }
 
     info->mq_desc = mq_desc;
@@ -261,7 +277,7 @@ int DhcpMgr_OpenQueueEnsureThread(interface_info_t *info)
     }
 
     /* Send the filled info to the controller queue */
-    if (mq_send(info->mq_desc, (char*)info, sizeof(*info), 0) == -1)
+    if (mq_send(mq_desc, (char*)info, sizeof(*info), 0) == -1)
     {
         DHCPMGR_LOG_ERROR("%s %d Failed to send message to queue %s\n", __FUNCTION__, __LINE__, info->mq_name);
         mq_close(mq_desc);
