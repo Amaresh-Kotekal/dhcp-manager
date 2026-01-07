@@ -355,14 +355,16 @@ static void configureNetworkInterface(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
     DHCPMGR_LOG_INFO("%s %d: PreferedLifeTime: %s, ValidLifeTime: %s\n", __FUNCTION__, __LINE__, preferredLftStr, validLftStr);
 
     // Use system calls or platform-specific APIs to configure the network interface
+    system("echo before `ifconfig erouter0` > /tmp/ifconfig_dhcpv6.txt");
     char command[256];
     snprintf(command, sizeof(command), "ip -6 addr add %s dev %s preferred_lft %s valid_lft %s", ipv6Address, interface, preferredLftStr, validLftStr);
-//    int ret = v_secure_system("ip -6 addr add %s dev %s preferred_lft %s valid_lft %s", ipv6Address, interface, preferredLftStr, validLftStr);
     if(exec_shell_cmd(command) != 0)
     {
         DHCPMGR_LOG_ERROR("%s %d: Failed to configure IPv6 address on interface %s. Command: %s\n", __FUNCTION__, __LINE__, interface, command);
     }
-
+    system("echo after `ifconfig erouter0` >> /tmp/ifconfig_dhcpv6.txt");
+    DHCPMGR_LOG_INFO("%s %d: Successfully configured IPv6 address on interface %s.\n", __FUNCTION__, __LINE__, interface);
+ 
     return;
 }
 
