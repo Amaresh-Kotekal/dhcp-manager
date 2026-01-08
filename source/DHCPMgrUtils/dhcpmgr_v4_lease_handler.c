@@ -373,7 +373,6 @@ void DhcpMgr_ProcessV4Lease(PCOSA_DML_DHCPC_FULL pDhcpc)
                 DHCPMGR_LOG_INFO("%s %d: NewLease->mtaOption Data %s  \n", __FUNCTION__, __LINE__, newLease->mtaOption.option_125);
                 Set_DhcpV4_CustomOption_mta(newLease->mtaOption.option_125,"v6");
             }
-            
             DHCPMGR_LOG_INFO("%s %d: Handling EROUTER_DHCP_OPTION_MTA\n", __FUNCTION__, __LINE__);
 #endif
             DhcpMgr_updateDHCPv4DML(pDhcpc);

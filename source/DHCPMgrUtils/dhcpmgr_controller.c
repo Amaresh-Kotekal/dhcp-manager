@@ -146,7 +146,7 @@ static int DhcpMgr_build_dhcpv4_opt_list (PCOSA_CONTEXT_DHCPC_LINK_OBJECT hInsCo
             else if(pDhcpSentOpt->Tag == DHCPV4_OPT_43 && strlen((char *)pDhcpSentOpt->Value) <= 0)
             {
                 DHCPMGR_LOG_INFO("%s %d: DHCPv4 option 43 (Vendor-Specific Information) entry found without value. \n", __FUNCTION__, __LINE__);
-                char optionValue[BUFLEN_256] = {0};
+                char optionValue[BUFLEN_512] = {0};
                 int ret = Get_DhcpV4_CustomOption43(pDhcpc->Cfg.Interface, optionValue, sizeof(optionValue));
                 if (ret == 0)
                 {

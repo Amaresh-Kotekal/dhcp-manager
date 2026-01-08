@@ -24,6 +24,8 @@
 #define DHCP_ACK_OPT59 "opt59"
 #define DHCP_MTA_IPV4 "opt122"
 #define DHCP_MTA_IPV6 "opt125"
+#define DHCP_MTA_OPT66 "opt66"
+#define DHCP_MTA_OPT67 "opt67"
 #define DHCP_REBINDING_TIME "rebindingtime"
 #define DHCP_SERVER_ID "serverid"
 #define DHCP_SIPSRV "sipsrv"

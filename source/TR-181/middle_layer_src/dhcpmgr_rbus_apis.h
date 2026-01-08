@@ -93,5 +93,18 @@ int DhcpMgr_PublishDhcpV4Event(PCOSA_DML_DHCPC_FULL pDhcpc, DHCP_MESSAGE_TYPE ms
  * @retval -1 if there is an error in publishing the event.
  */
 int DhcpMgr_PublishDhcpV6Event(PCOSA_DML_DHCPCV6_FULL pDhcpv6c, DHCP_MESSAGE_TYPE msgType);
+
+/*
+ *@brief rbus get data handler.
+ * This function is called when other components request data for the registered rbus data elements.
+ * It handles the get data actions for the specified rbus properties.
+ * @param handle The rbus handle.
+ * @param rbusProperty The rbus property for which data is requested.
+ * @param pRbusGetHandlerOptions Options for the get handler.
+ * @return rbusError_t
+ * @retval RBUS_ERROR_SUCCESS if the data is retrieved successfully.
+ * @retval RBUS_ERROR_FAILURE if there is an error retrieving the data.
+*/
+rbusError_t getDataHandler(rbusHandle_t rbusHandle, rbusProperty_t rbusProperty,rbusGetHandlerOptions_t *pRbusGetHandlerOptions);
 #endif// _DHCPMGR_RBUS_H_
 

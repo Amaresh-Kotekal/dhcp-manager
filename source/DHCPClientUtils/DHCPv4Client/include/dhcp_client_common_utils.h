@@ -110,14 +110,19 @@ typedef  unsigned long              ULONG;
 
 //DHCPv4 Options
 #define DHCPV4_OPT_2   2   // Time Offset
+#define DHCPV4_OPT_4   4   // Time Server
+#define DHCPV4_OPT_7   7   // Log Server
 #define DHCPV4_OPT_42  42  // NTP Server Addresses
 #define DHCPV4_OPT_43  43  // Vendor Specific Information
+#define DHCPV4_OPT_54  54  // DHCP Server Identifier
 #define DHCPV4_OPT_58  58  // DHCP Renewal (T1) Time
 #define DHCPV4_OPT_59  59  // DHCP Rebinding (T2) Time
 #define DHCPV4_OPT_60  60  // Class Identifier
 #define DHCPV4_OPT_61  61  // Client Identifier
+#define DHCPV4_OPT_99  99  // TFTP Server IP Address
 #define DHCPV4_OPT_100 100 // IEEE 1003.1 TZ String
 #define DHCPV4_OPT_122 122 // CableLabs Client Configuration
+#define DHCPV4_OPT_123 123 // Time zone offset
 #define DHCPV4_OPT_125 125 // Vendor-Identifying Vendor-Specific Information
 #define DHCPV4_OPT_242 242 // Private Use
 #define DHCPV4_OPT_243 243 // Private Use

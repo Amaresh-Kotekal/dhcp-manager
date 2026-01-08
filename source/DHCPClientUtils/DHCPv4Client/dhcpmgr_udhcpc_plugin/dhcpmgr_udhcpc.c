@@ -253,7 +253,7 @@ static int get_and_fill_env_data (DHCPv4_PLUGIN_MSG *dhcpv4_data, udhcpc_env_t* 
             DHCPMGR_LOG_ERROR("[%s-%d] Timeoffset is not available in dhcp ack \n",  __FUNCTION__,__LINE__);
         }
 
-#if defined (EROUTER_DHCP_OPTION_MTA)
+/* #if defined (EROUTER_DHCP_OPTION_MTA) */
         /* opt122 and opt125 for MTA */
         if ((env = getenv(DHCP_MTA_IPV4)) != NULL)
         {
@@ -273,11 +273,29 @@ static int get_and_fill_env_data (DHCPv4_PLUGIN_MSG *dhcpv4_data, udhcpc_env_t* 
             }
             dhcpv4_data->mtaOption.Assigned125 = 1;
         }
+        else if ((env = getenv(DHCP_MTA_OPT67)) != NULL)
+        {
+            strncpy(dhcpv4_data->mtaOption.option_67, env, sizeof(dhcpv4_data->mtaOption.option_67));
+            if (dhcpv4_data->mtaOption.option_67 == NULL)
+            {
+                DHCPMGR_LOG_ERROR("[%s-%d] Failed to copy data for MTA Option 67 \n", __FUNCTION__, __LINE__);
+            }
+            dhcpv4_data->mtaOption.Assigned67 = 1;
+        }
+        else if ((env = getenv(DHCP_MTA_OPT66)) != NULL)
+        {
+            strncpy(dhcpv4_data->mtaOption.option_66, env, sizeof(dhcpv4_data->mtaOption.option_66));
+            if (dhcpv4_data->mtaOption.option_66 == NULL)
+            {
+                DHCPMGR_LOG_ERROR("[%s-%d] Failed to copy data for MTA Option 66 \n", __FUNCTION__, __LINE__);
+            }
+            dhcpv4_data->mtaOption.Assigned66 = 1;
+        }
         else
         {
             DHCPMGR_LOG_ERROR("[%s-%d] MTA option is not available in dhcp ack \n",  __FUNCTION__,__LINE__);
         }
-#endif
+/* #endif */
         /** UpstreamCurrRate. **/
         if ((env = getenv(DHCP_UPSTREAMRATE)) != NULL)
         {
@@ -422,8 +440,12 @@ static int handle_events (udhcpc_env_t *pinfo)
         DHCPMGR_LOG_INFO("[%s][%d] TimeZone        = %s \n", __FUNCTION__, __LINE__, data.timeZone);
         DHCPMGR_LOG_INFO("[%s][%d] DHCP Server ID  = %s \n", __FUNCTION__, __LINE__, data.dhcpServerId);
         DHCPMGR_LOG_INFO("[%s][%d] DHCP State      = %s \n", __FUNCTION__, __LINE__, data.dhcpState);
+        DHCPMGR_LOG_INFO("[%s][%d] MTA opt122      = %s \n", __FUNCTION__, __LINE__, data.mtaOption.option_122);
     }
 
+    DHCPMGR_LOG_INFO("[%s][%d] MTA opt122      = %s \n", __FUNCTION__, __LINE__, data.mtaOption.option_122);
+    DHCPMGR_LOG_INFO("[%s][%d] MTA opt66      = %s \n", __FUNCTION__, __LINE__, data.mtaOption.option_66);
+    DHCPMGR_LOG_INFO("[%s][%d] MTA opt67      = %s \n", __FUNCTION__, __LINE__, data.mtaOption.option_67);
     ret = send_dhcp4_data_to_leaseMonitor(&data);
     if (ret != 0)
     {

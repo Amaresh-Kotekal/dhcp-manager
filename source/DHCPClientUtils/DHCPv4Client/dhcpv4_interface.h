@@ -26,15 +26,19 @@
 #include "util.h"
 
 
-#if defined (EROUTER_DHCP_OPTION_MTA)
+/* #if defined (EROUTER_DHCP_OPTION_MTA) */
 typedef struct MTA_OPTION
 {
     BOOL Assigned122;
     BOOL Assigned125;
+    BOOL Assigned67;
+    BOOL Assigned66;
     char option_122[BUFLEN_256];
     char option_125[BUFLEN_256];
+    char option_67[BUFLEN_256];
+    char option_66[BUFLEN_256];
 }mta_Option;
-#endif
+/* #endif */
 
 typedef struct _DHCPv4_PLUGIN_MSG
 {
@@ -60,9 +64,9 @@ typedef struct _DHCPv4_PLUGIN_MSG
     uint32_t mtuSize;                  /** MTU Size, if mtuAssigned==TRUE */
     char sipSrv[BUFLEN_64];            /** Dhcp sipsrv. */
     char staticRoutes[BUFLEN_64];      /** Dhcp classless static route */
-#if defined (EROUTER_DHCP_OPTION_MTA)
+/* #if defined (EROUTER_DHCP_OPTION_MTA) */
     mta_Option mtaOption;              /** MTA options */
-#endif
+/* #endif */
     struct _DHCPv4_PLUGIN_MSG  *next;  /** link to the next lease */
 } DHCPv4_PLUGIN_MSG;
 
