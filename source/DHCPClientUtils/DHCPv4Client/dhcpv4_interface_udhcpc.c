@@ -89,6 +89,7 @@ static int udhcpc_get_req_options (char * buff, dhcp_opt_list * req_opt_list)
  * @param[in] ascii_len Length of the output buffer.
  * @return 0 on success, -1 on failure.
  */
+
 static int hex_to_ascii(const char *hex, char *ascii, size_t ascii_len)
 {
     if (hex == NULL || ascii == NULL || ascii_len == 0)
@@ -139,27 +140,32 @@ static int udhcpc_get_send_options (char * buff, dhcp_opt_list * send_opt_list)
         return SUCCESS;
     }
 
-    char args [BUFLEN_128] = {0};
+    char args [BUFLEN_512] = {0};
     while ((send_opt_list != NULL) && (send_opt_list->dhcp_opt_val != NULL))
     {
-        memset (&args, 0, BUFLEN_128);
+        memset (&args, 0, BUFLEN_512);
         if (send_opt_list->dhcp_opt == DHCPV4_OPT_60)
         {
-            /* Option 60 - Vendor Class Identifier has udhcp cmd line arg "-V <option-str>"
-             * If this option is not set with '-V' then udhcpc will add a default vendor class option with its name and version. 
-             * So we need to set this option with '-V' with ACSII string.
-             */
-              
-            char ascii_val[BUFLEN_128] = {0};
-            if( hex_to_ascii(send_opt_list->dhcp_opt_val, ascii_val, sizeof(ascii_val)) == 0)
+            if(0== strncmp(send_opt_list->dhcp_opt_val,"pktc2.0:",strlen("pktc2.0:")))
             {
-
-                snprintf(args, BUFLEN_128, "-V %s ", ascii_val);
+                snprintf(args, BUFLEN_512, "-V %s ", send_opt_list->dhcp_opt_val);
+            }
+            else
+            {
+                /* Option 60 - Vendor Class Identifier has udhcp cmd line arg "-V <option-str>"
+                 * If this option is not set with '-V' then udhcpc will add a default vendor class option with its name and version.
+                 * So we need to set this option with '-V' with ACSII string.
+                 */
+                char ascii_val[BUFLEN_128] = {0};
+                if( hex_to_ascii(send_opt_list->dhcp_opt_val, ascii_val, sizeof(ascii_val)) == 0)
+                {
+                    snprintf(args, BUFLEN_128, "-V %s ", ascii_val);
+                }
             }
         }
         else
         {
-            snprintf (args, BUFLEN_128, "-x 0x%02X:%s ", send_opt_list->dhcp_opt, send_opt_list->dhcp_opt_val);
+            snprintf (args, BUFLEN_512, "-x 0x%02X:%s ", send_opt_list->dhcp_opt, send_opt_list->dhcp_opt_val);
         }
         send_opt_list = send_opt_list->next;
         strcat (buff,args);
@@ -277,7 +283,7 @@ pid_t start_dhcpv4_client(char *interfaceName, dhcp_opt_list *req_opt_list, dhcp
     }
 
 
-    char buff [BUFLEN_512] = {0};
+    char buff [BUFLEN_1024] = {0};
     udhcpc_args_generator(buff,interfaceName, req_opt_list, send_opt_list);
 
 

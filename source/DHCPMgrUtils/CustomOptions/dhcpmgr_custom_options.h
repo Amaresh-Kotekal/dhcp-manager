@@ -21,21 +21,6 @@
 #define DHCP_CUSTOM_OPTIONS_H
 #include <stdlib.h>
 #include <stdint.h>
-
-typedef struct
-{
-    //char cDeviceType[32]; For Technicolor value is EDVA
-    char cSerialNumber[64];
-    char cHardwareVersion[64];
-    char cSoftwareVersion[64];
-    char cBootLoaderVersion[64];
-    char cOUID[64];
-    char cModelNumber[64];
-    char cVendorName[64];
-    char cMtaMacAddress[64];
-    //char cCorrelationId[32]; For Technicolor value is 36392396
-}dhcpOption43RawData_t;
-
 /**
  * @brief Creates a custom DHCPv4 Option 43 (Vendor Specific Information) at runtime.
  *

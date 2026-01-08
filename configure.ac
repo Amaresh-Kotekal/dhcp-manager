@@ -228,6 +228,16 @@ AC_ARG_ENABLE([bci_support],
 esac],[bci_support=false])
 AM_CONDITIONAL(BCI_SUPPORT, test x"$bci_support" = x"true")
 
+# Checks for DHCP_VoiceOptions_support
+AC_ARG_ENABLE([dhcpVoiceOptions_support],
+[  --enable-dhcpVoiceOptions_support=val Turn on dhcp_VoiceOptions, val=true or false],
+[case "${enableval}" in
+  yes) dhcp_voiceOptions_support=true ;;
+  no)  dhcp_voiceOptions_support=false ;;
+  *) AC_MSG_ERROR([bad value ${enableval} for --enable-dhcpVoiceOptions_support]) ;;
+esac],[dhcp_voiceOptions_support=false])
+AM_CONDITIONAL(DHCP_VOICE_OPTIONS_SUPPORT, test x"$dhcp_voiceOptions_support" = x"true")
+
 # Check ra_monitor_support
 AM_CONDITIONAL([RA_MONITOR_SUPPORT], [test "$RA_MONITOR_SUPPORT" = "yes"])
 

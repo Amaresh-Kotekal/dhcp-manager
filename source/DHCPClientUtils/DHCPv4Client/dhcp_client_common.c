@@ -231,7 +231,7 @@ static int check_proc_entry_for_pid (char * name, char * args)
     int64_t pid;
     int rval = 0;
     char processName[BUFLEN_256];
-    char cmdline[512] = {0};
+    char cmdline[1024] = {0};
     char filename[BUFLEN_256];
     char status = 0;
 
