@@ -402,7 +402,6 @@ static void cleanup_handler(int signo)
 int dhcp_server_init_main() {
     
     DHCPMGR_LOG_INFO("%s:%d DHCP Manager starting...\n", __FUNCTION__, __LINE__);
-    DhcpMgr_Rbus_Init(); // Initialize rbus
     /* Create/open the message queues centrally so other libraries can use the descriptors.
        mq_dispatch corresponds to MQ_NAME (dispatch queue, holds DhcpMgr_DispatchEvent values)
        mq_fsm corresponds to SM_MQ_NAME (fsm queue, holds DhcpManagerEvent values)
