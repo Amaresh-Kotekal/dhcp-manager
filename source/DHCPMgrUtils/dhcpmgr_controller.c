@@ -726,12 +726,10 @@ void* DhcpMgr_MainController( void *args )
     mqd_t mq_desc;
     struct timespec timeout;
     ssize_t bytes_read;
-    interface_info_t prev_info;
     interface_info_t info;
     char mq_name[MQ_NAME_LEN] = {0};
 
     memset(&info, 0, sizeof(interface_info_t));
-    memset(&prev_info, 0, sizeof(interface_info_t));
     DHCPMGR_LOG_INFO("%s %d: Entered with arg %s\n",__FUNCTION__, __LINE__, (char*)args);
     if(args != NULL)
     {
@@ -770,9 +768,7 @@ void* DhcpMgr_MainController( void *args )
             if (errno == ETIMEDOUT) 
             {
                 DHCPMGR_LOG_INFO("%s %d: mq_timedreceive timed out for queue %s\n", __FUNCTION__, __LINE__, info.if_name);
-                DHCPMGR_LOG_INFO("%s %d: mq_timedreceive timed out for previous info %s\n", __FUNCTION__, __LINE__, prev_info.if_name);
-                pthread_mutex_lock(&prev_info.q_mutex); //MUTEX lock to drain the queue
-                DHCPMGR_LOG_INFO("%s %d Thread for %s:  Cleaning up before exit...\n", __FUNCTION__, __LINE__, prev_info.mq_name);
+                pthread_mutex_lock(&info.q_mutex); //MUTEX lock to drain the queue
                 break;
             }
             else 
@@ -782,10 +778,6 @@ void* DhcpMgr_MainController( void *args )
                 break;
             }
         }
-
-        memcpy(&prev_info, &info, sizeof(interface_info_t));
-        DHCPMGR_LOG_INFO("%s %d: Received message for interface %s\n", __FUNCTION__, __LINE__, prev_info.if_name);
-        DHCPMGR_LOG_INFO("%s %d: THread Runing=%d\n", __FUNCTION__, __LINE__, info.thread_running);
 
         if (info.dhcpType == DML_DHCPV4) 
         {
@@ -800,10 +792,9 @@ void* DhcpMgr_MainController( void *args )
     }
 
     DHCPMGR_LOG_INFO("%s %d: Cleaning up DhcpMgr_MainController thread for interface %s\n", __FUNCTION__, __LINE__, info.if_name);
-    DHCPMGR_LOG_INFO("%s %d: Cleaning up DhcpMgr_MainController thread for previous interface %s\n", __FUNCTION__, __LINE__, prev_info.if_name);
-    mark_thread_stopped(prev_info.if_name);
+    mark_thread_stopped(info.if_name);
     mq_close(mq_desc);
-    pthread_mutex_unlock(&prev_info.q_mutex);
+    pthread_mutex_unlock(&info.q_mutex);
     
     /* Mark thread as stopped so new one can be created if needed */
     DHCPMGR_LOG_INFO("%s %d: Exiting DhcpMgr_MainController thread for mq %s\n", __FUNCTION__, __LINE__, mq_name);
