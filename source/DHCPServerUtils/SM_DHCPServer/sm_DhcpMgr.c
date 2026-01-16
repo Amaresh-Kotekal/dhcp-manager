@@ -263,8 +263,13 @@ void* FSM_Dispatch_Thread(void* arg)
         return NULL;
     }
 
-    /* use fixed message size for DhcpManagerEvent */
-    size_t msgsize = sizeof(DhcpManagerEvent);
+    /* allocate buffer based on actual queue msgsize to avoid EMSGSIZE */
+    struct mq_attr qattr;
+    if (mq_getattr(mq, &qattr) == -1) {
+        DHCPMGR_LOG_ERROR("%s:%d FSM_Dispatch_Thread: mq_getattr failed: %s", __FUNCTION__, __LINE__, strerror(errno));
+        return NULL;
+    }
+    size_t msgsize = (size_t)qattr.mq_msgsize;
     buf = malloc(msgsize);
     if (!buf) {
         DHCPMGR_LOG_ERROR("%s:%d FSM_Dispatch_Thread: malloc failed: %s", __FUNCTION__, __LINE__, strerror(errno));
@@ -283,7 +288,9 @@ void* FSM_Dispatch_Thread(void* arg)
             } else {
                 DHCPMGR_LOG_ERROR("%s:%d FSM_Dispatch_Thread: received message too small (%ld bytes)\n", __FUNCTION__, __LINE__, (long)n);
             }
-        } else {
+        } 
+        else 
+        {
             if (errno == EINTR) continue;
             DHCPMGR_LOG_ERROR("%s:%d FSM_Dispatch_Thread: mq_receive failed: %s", __FUNCTION__, __LINE__, strerror(errno));
             break;
@@ -291,7 +298,6 @@ void* FSM_Dispatch_Thread(void* arg)
     }
 
     free(buf);
-    DHCPMGR_LOG_ERROR("%s:%d Exit", __FUNCTION__, __LINE__);
     /* do not close mq_fsm here; main owns it */
     return NULL;
 }
@@ -313,7 +319,12 @@ void *FSMThread(void *arg)
         return NULL;
     }
 
-    size_t msgsize = sizeof(DhcpMgr_DispatchEvent);
+    struct mq_attr qattr;
+    if (mq_getattr(mq, &qattr) == -1) {
+        DHCPMGR_LOG_ERROR("%s:%d FSMThread: mq_getattr failed: %s", __FUNCTION__, __LINE__, strerror(errno));
+        return NULL;
+    }
+    size_t msgsize = (size_t)qattr.mq_msgsize;
     buf = malloc(msgsize);
     if (!buf) {
         DHCPMGR_LOG_ERROR("%s:%d FSMThread: malloc failed: %s", __FUNCTION__, __LINE__, strerror(errno));
@@ -402,6 +413,7 @@ static void cleanup_handler(int signo)
 int dhcp_server_init_main() {
     
     DHCPMGR_LOG_INFO("%s:%d DHCP Manager starting...\n", __FUNCTION__, __LINE__);
+    DhcpMgr_Rbus_Init(); // Initialize rbus
     /* Create/open the message queues centrally so other libraries can use the descriptors.
        mq_dispatch corresponds to MQ_NAME (dispatch queue, holds DhcpMgr_DispatchEvent values)
        mq_fsm corresponds to SM_MQ_NAME (fsm queue, holds DhcpManagerEvent values)
