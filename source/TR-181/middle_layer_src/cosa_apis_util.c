@@ -81,18 +81,18 @@ int create_message_queue(const char *mq_name, mqd_t *mq_desc) {
     /* Set queue attributes */
     attr.mq_flags = 0;
     attr.mq_maxmsg = MQ_MAX_MESSAGES;
-    attr.mq_msgsize = sizeof(interface_info_t);
+    attr.mq_msgsize = sizeof(mq_send_msg_t);
     attr.mq_curmsgs = 0;
 
 //    DHCPMGR_LOG_INFO("%s %d Creating mq with attrs: maxmsg=%ld msgsize=%ld\n", __FUNCTION__, __LINE__, (long)attr.mq_maxmsg, (long)attr.mq_msgsize);
     *mq_desc = mq_open(mq_name, O_CREAT | O_RDWR | O_NONBLOCK, 0644, &attr);
     
     if (*mq_desc == (mqd_t)-1) {
-        DHCPMGR_LOG_ERROR("%s %d mq_open failed", __FUNCTION__, __LINE__);
+        DHCPMGR_LOG_ERROR("%s %d mq_open failed\n", __FUNCTION__, __LINE__);
         return -1;
     }
     
-    DHCPMGR_LOG_INFO("%s %d Message queue %s created successfully", __FUNCTION__, __LINE__, mq_name);
+    DHCPMGR_LOG_INFO("%s %d Message queue %s created successfully\n", __FUNCTION__, __LINE__, mq_name);
     return 0;
 }
 
@@ -100,22 +100,22 @@ int create_message_queue(const char *mq_name, mqd_t *mq_desc) {
 /* Delete (close) a message queue */
 int delete_message_queue(mqd_t mq_desc) {
     if (mq_close(mq_desc) == -1) {
-        DHCPMGR_LOG_ERROR("%s %d mq_close failed", __FUNCTION__, __LINE__);
+        DHCPMGR_LOG_ERROR("%s %d mq_close failed\n", __FUNCTION__, __LINE__);
         return -1;
     }
     
-    DHCPMGR_LOG_INFO("%s %d Message queue closed successfully", __FUNCTION__, __LINE__  );
+    DHCPMGR_LOG_INFO("%s %d Message queue closed successfully\n", __FUNCTION__, __LINE__  );
     return 0;
 }
 
 /* Unlink a message queue */
 int unlink_message_queue(const char *mq_name) {
     if (mq_unlink(mq_name) == -1) {
-        DHCPMGR_LOG_ERROR("%s %d mq_unlink failed", __FUNCTION__, __LINE__);
+        DHCPMGR_LOG_ERROR("%s %d mq_unlink failed\n", __FUNCTION__, __LINE__);
         return -1;
     }
     
-    DHCPMGR_LOG_INFO("%s %d Message queue %s unlinked successfully", __FUNCTION__, __LINE__, mq_name);
+    DHCPMGR_LOG_INFO("%s %d Message queue %s unlinked successfully\n", __FUNCTION__, __LINE__, mq_name);
     return 0;
 }
 
@@ -277,6 +277,8 @@ int DhcpMgr_OpenQueueEnsureThread(dhcp_info_t info)
     {
         DHCPMGR_LOG_ERROR("%s %d Failed to send message to queue %s\n", __FUNCTION__, __LINE__, tmp_info.mq_name);
         mq_close(mq_desc);
+        tmp_info.thread_running = FALSE;
+        update_interface_info(info.if_name, &tmp_info);
         pthread_mutex_unlock(&tmp_info.q_mutex);
         return -1;
     }
