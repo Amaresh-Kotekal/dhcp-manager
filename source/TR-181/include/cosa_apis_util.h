@@ -209,17 +209,16 @@ typedef struct {
     char if_name[MAX_STR_LEN];
     char mq_name[MAX_STR_LEN];
     BOOL thread_running;
-    mqd_t mq_desc;
-    pthread_mutex_t mutex;
-    dml_set_msg_t msg;
-    DML_DHCP_TYPE dhcpType;
+    pthread_mutex_t q_mutex; // Mutex for Queue operations
+    dml_set_msg_t msg;      // TODO need to do this in a spearate struct
+    DML_DHCP_TYPE dhcpType; // TODO need to do this in a spearate struct
 } interface_info_t;
 
 /* Message queue operations */
 int create_message_queue(const char *alias_name, char *mq_name_out, mqd_t *mq_desc);
 int delete_message_queue(mqd_t mq_desc);
 int unlink_message_queue(const char *mq_name);
-int find_or_create_interface(const char *alias_name, interface_info_t *info_out);
+int find_or_create_interface(interface_info_t *info_in, interface_info_t *info_out);
 int create_interface_thread(char *info_aliasName);
 int update_interface_info(const char *alias_name, interface_info_t *info);
 int mark_thread_stopped(const char *alias_name);
