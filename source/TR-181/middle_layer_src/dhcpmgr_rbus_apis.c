@@ -47,7 +47,7 @@ rbusError_t DhcpMgr_Rbus_SubscribeHandler(rbusHandle_t handle, rbusEventSubActio
  ***********************************************************************/
 rbusDataElement_t DhcpMgrRbusDataElements[] = {
     {DHCP_MGR_DHCPv4_IFACE, RBUS_ELEMENT_TYPE_TABLE, {NULL, NULL, NULL, NULL, NULL, NULL}},
-    {DHCP_MGR_DHCPv4_STATUS,  RBUS_ELEMENT_TYPE_PROPERTY, {NULL, NULL, NULL, NULL, DhcpMgr_Rbus_SubscribeHandler, NULL}},
+    {DHCP_MGR_DHCPv4_STATUS,  RBUS_ELEMENT_TYPE_PROPERTY, {getDataHandler, NULL, NULL, NULL, DhcpMgr_Rbus_SubscribeHandler, NULL}},
     {DHCP_MGR_DHCPv6_IFACE, RBUS_ELEMENT_TYPE_TABLE, {NULL, NULL, NULL, NULL, NULL, NULL}},
     {DHCP_MGR_DHCPv6_STATUS,  RBUS_ELEMENT_TYPE_PROPERTY, {NULL, NULL, NULL, NULL, DhcpMgr_Rbus_SubscribeHandler, NULL}},
 };
@@ -264,6 +264,14 @@ static void DhcpMgr_createDhcpv6LeaseInfoMsg(DHCPv6_PLUGIN_MSG *src, DHCP_MGR_IP
 #endif // FEATURE_MAPT || FEATURE_SUPPORT_MAPT_NAT46
 }
 
+rbusError_t getDataHandler(rbusHandle_t rbusHandle, rbusProperty_t rbusProperty,rbusGetHandlerOptions_t *pRbusGetHandlerOptions)
+{
+    (void)rbusHandle;
+    (void)pRbusGetHandlerOptions;
+    (void)rbusProperty;
+    return RBUS_ERROR_SUCCESS;
+}
+#if 0
 rbusError_t getDataHandler(rbusHandle_t rbusHandle,rbusProperty_t rbusProperty,rbusGetHandlerOptions_t *pRbusGetHandlerOptions)
 {
     (void)rbusHandle;
@@ -274,7 +282,7 @@ rbusError_t getDataHandler(rbusHandle_t rbusHandle,rbusProperty_t rbusProperty,r
     if (0 != strncmp(pName, DHCP_MGR_DHCPv4_TABLE, strlen(DHCP_MGR_DHCPv4_TABLE)))
     {
         DHCPMGR_LOG_ERROR("%s %d - Unsupported property name %s\n", __FUNCTION__, __LINE__, pName);
-        return RBUS_ERROR_BUS_ERROR;
+        return RBUS_ERROR_SUCCESS;
     }
     sscanf(pName, DHCPv4_EVENT_FORMAT, &iDmIndex);
     DHCPMGR_LOG_INFO("%s %d - Getting data for property %s with index %d\n", __FUNCTION__, __LINE__, pName, iDmIndex);
@@ -294,17 +302,17 @@ rbusError_t getDataHandler(rbusHandle_t rbusHandle,rbusProperty_t rbusProperty,r
     if (NULL == pDhcpc)
     {
         DHCPMGR_LOG_ERROR("%s %d - Failed to get DHCPv4 client context for index %d\n", __FUNCTION__, __LINE__, iIndex);
-        return RBUS_ERROR_BUS_ERROR;
+        return RBUS_ERROR_SUCCESS;
     }
     if (ulInstanceNum != (unsigned long) iDmIndex)
     {
         DHCPMGR_LOG_ERROR("%s %d - Instance number mismatch: expected %d, got %lu\n", __FUNCTION__, __LINE__, iDmIndex, ulInstanceNum);
-        return RBUS_ERROR_BUS_ERROR;
+        return RBUS_ERROR_SUCCESS;
     }
     if ('\0' == pDhcpc->Cfg.Interface[0] || 0 == strlen(pDhcpc->Cfg.Interface))
     {
         DHCPMGR_LOG_ERROR("%s %d - Interface name is NULL for index %d\n", __FUNCTION__, __LINE__, iIndex);
-        return RBUS_ERROR_BUS_ERROR;
+        return RBUS_ERROR_SUCCESS;
     }
     DHCPMGR_LOG_INFO("%s %d Ifname: %s, index: %d, InstanceNumber: %lu\n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface, iIndex, ulInstanceNum);
 
@@ -351,6 +359,7 @@ rbusError_t getDataHandler(rbusHandle_t rbusHandle,rbusProperty_t rbusProperty,r
 
     return RBUS_ERROR_SUCCESS;
 }
+#endif
 /**
  * @brief Publishes DHCPv4 rbus events.
  *
