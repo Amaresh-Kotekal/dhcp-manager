@@ -413,7 +413,7 @@ static int send_dhcp4_data_to_leaseMonitor (DHCPv4_PLUGIN_MSG *dhcpv4_data)
 
     for (int i = 0; i < MAX_SEND_THRESHOLD; i++)
     {
-        bytes = nn_send(sock, (char *) &msg, sz_msg, 0);
+        bytes = nn_send(sock, (char *) &msg, sz_msg, NN_DONTWAIT);
         if (bytes < 0)
         {
             sleep(1);
