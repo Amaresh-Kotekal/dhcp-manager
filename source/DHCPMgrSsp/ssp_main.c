@@ -473,7 +473,13 @@ DHCPMGR_LOG_WARNING("\nAfter Cdm_Init\n");
     DhcpMgr_Rbus_Init();
 
     DHCPMGR_LOG_INFO("DhcpMgr_StartMainController Init \n");
-    DhcpMgr_StartMainController();
+    if (DhcpMgr_StartMainController() != 0)
+    {
+        DHCPMGR_LOG_ERROR("DhcpMgr_StartMainController failed - Lease Monitor could not start. "
+                          "Exiting so systemd can restart the process.\n");
+        t2_event_d("DHCPMGR_ERROR_LeaseMonitorFatalExit", 1);
+        exit(1);
+    }
     DHCPMGR_LOG_INFO("DhcpMgr_StartMainController Init Complete\n");
 
     system("touch /tmp/dhcpmgr_initialized");

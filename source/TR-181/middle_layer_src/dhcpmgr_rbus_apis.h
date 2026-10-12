@@ -54,8 +54,9 @@ ANSC_STATUS DhcpMgr_Rbus_Init();
  * @brief Publishes DHCPv4 rbus events.
  *
  * This function publishes DHCPv4 rbus events based on the specified message type.
- * The rbus event will include the tags "IfName" and "MsgType". For the `DHCP_LEASE_UPDATE` message type,
- * it additionally sends "LeaseInfo".
+ * The rbus event will include the tags "IfName" and "MsgType". For the `DHCP_LEASE_UPDATE` and
+ * `DHCP_LEASE_RENEW` message types, it additionally sends "LeaseInfo" containing the current
+ * lease parameters (IP address, netmask, gateway, DNS servers, lease time, renewal time, etc.).
  *
  * @param pDhcpc Pointer to the DHCP client structure.
  * @param msgType The type of DHCP message to be published. The possible values are:
@@ -76,8 +77,9 @@ int DhcpMgr_PublishDhcpV4Event(PCOSA_DML_DHCPC_FULL pDhcpc, DHCP_MESSAGE_TYPE ms
  * @brief Publishes DHCPv6 rbus events.
  *
  * This function publishes DHCPv6 rbus events based on the specified message type.
- * The rbus event will include the tags "IfName" and "MsgType". For the `DHCP_LEASE_UPDATE` message type,
- * it additionally sends "LeaseInfo".
+ * The rbus event will include the tags "IfName" and "MsgType". For the `DHCP_LEASE_UPDATE` and
+ * `DHCP_LEASE_RENEW` message types, it additionally sends "LeaseInfo" containing the current
+ * lease parameters.
  *
  * @param pDhcpv6c Pointer to the DHCPv6 client structure.
  * @param msgType The type of DHCP message to be published. The possible values are:

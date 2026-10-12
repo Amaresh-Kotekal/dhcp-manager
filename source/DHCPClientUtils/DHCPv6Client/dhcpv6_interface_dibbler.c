@@ -36,10 +36,45 @@
 #define DIBBLER_PLUGIN_EXE                "/usr/bin/dhcpmgr_dibbler_plugin"
 #define DIBBLER_LOG_CONFIG                "log-level 7\nlog-mode full\n"
 #define DIBBLER_DUID_LL_CONFIG            "duid-type duid-ll\n"  
-#define DIBBLER_CLIENT_TERMINATE_INTERVAL (0.5 * MSECS_IN_SEC)
+#define DIBBLER_CLIENT_TERMINATE_INTERVAL (MSECS_IN_SEC / 2)
 #define DIBBLER_TMP_DIR_PATH              "/var/lib/dibbler"
 #define DIBBLER_RADVD_FILE                "/etc/dibbler/radvd.conf"
 #define DIBBLER_RADVD_FILE_OLD            "/etc/dibbler/radvd.conf.old"
+
+/* Verify the PID still belongs to dibbler-client before sending another signal. */
+static bool is_dibbler_running(pid_t pid)
+{
+    char path[BUFLEN_64];
+    char name[sizeof(DIBBLER_CLIENT) + 1] = {0};
+    snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+
+    FILE *fp = fopen(path, "r");
+    if (fp == NULL)
+    {
+        return false;
+    }
+
+    bool running = fgets(name, sizeof(name), fp) != NULL;
+    fclose(fp);
+    name[strcspn(name, "\n")] = '\0';
+    return running && strcmp(name, DIBBLER_CLIENT) == 0;
+}
+
+/* Poll /proc because the SIGCHLD handler may reap the process before waitpid. */
+static bool wait_for_dibbler_exit(pid_t pid, unsigned int timeout)
+{
+    while (is_dibbler_running(pid))
+    {
+        if (timeout == 0)
+        {
+            return false;
+        }
+        unsigned int wait_time = timeout > DIBBLER_CLIENT_TERMINATE_INTERVAL ? DIBBLER_CLIENT_TERMINATE_INTERVAL : timeout;
+        usleep(wait_time * USECS_IN_MSEC);
+        timeout -= wait_time;
+    }
+    return true;
+}
 
 static int copy_file (char * src, char * dst)
 {
@@ -515,9 +550,21 @@ int send_dhcpv6_release(pid_t processID) {
         DHCPMGR_LOG_ERROR("%s %d: unable to send signal to pid %d\n", __FUNCTION__, __LINE__, processID);
          return FAILURE;
     }
-    struct timespec ts = {2, 0};
-    nanosleep(&ts, NULL);
-    //TODO: start_exe2 will add a sigchild handler, Do we still require this call ?
-    int ret = collect_waiting_process(processID, DIBBLER_CLIENT_TERMINATE_TIMEOUT);
-    return ret;
+    if (wait_for_dibbler_exit(processID, DIBBLER_CLIENT_TERMINATE_TIMEOUT))
+    {
+        return SUCCESS;
+    }
+
+    DHCPMGR_LOG_WARNING("%s %d: dibbler-client still running. Sending SIGKILL to pid %d\n", __FUNCTION__, __LINE__, processID);
+    if (signal_process(processID, SIGKILL) != RETURN_OK)
+    {
+        DHCPMGR_LOG_ERROR("%s %d: unable to send SIGKILL to pid %d\n", __FUNCTION__, __LINE__, processID);
+        return FAILURE;
+    }
+    if (!wait_for_dibbler_exit(processID, MSECS_IN_SEC))
+    {
+        DHCPMGR_LOG_ERROR("%s %d: unable to kill dibbler-client pid %d\n", __FUNCTION__, __LINE__, processID);
+        return FAILURE;
+    }
+    return SUCCESS;
 }

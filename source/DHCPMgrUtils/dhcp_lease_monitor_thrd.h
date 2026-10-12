@@ -27,6 +27,9 @@
 
 #define DHCP_MANAGER_ADDR              "tcp://127.0.0.1:50324"
 
+#define LEASE_MONITOR_BIND_MAX_RETRIES          40
+#define LEASE_MONITOR_BIND_RETRY_DELAY_USEC    500000
+
 typedef enum {
     DHCP_VERSION_4,
     DHCP_VERSION_6,
