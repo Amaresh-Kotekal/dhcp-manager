@@ -133,6 +133,12 @@ __attribute__((weak)) int Set_DhcpV4_CustomOption43(const char *ifName, const ch
  * 
  * @return A pointer to a dynamically allocated string containing the parsed suboption value.
  *         The caller is responsible for freeing the allocated memory.
+ *
+ * RDKB-67443: Harden option 17 parsing. Delete colons (instead of replacing
+ * them with spaces) so the fixed-width hex fields stay aligned, and bound the
+ * suboption length against the destination buffer and the remaining input
+ * before copying. Previously a crafted length (e.g. 0xff) caused a stack
+ * buffer overflow and crashed CcspDHCPMgr.
  */
 static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip_mode) 
 {
@@ -150,14 +156,16 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
         return NULL;
     }
 
-    // Remove colons from the input string
+    // Delete colons from the input string so the fixed-width hex fields align
+    char *write_ptr = dhcp_option_copy;
     for (char *p = dhcp_option_copy; *p; ++p) 
     {
-        if (*p == ':') 
+        if (*p != ':') 
         {
-            *p = ' ';
+            *write_ptr++ = *p;
         }
     }
+    *write_ptr = '\0';
 
     int val = 2;
     int len = (strcmp(ip_mode, "v4") == 0) ? 2 : 4;
@@ -165,6 +173,12 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
     char *remaining = dhcp_option_copy;
     while (*remaining != '\0') 
     {
+        // Need the id and length fields before reading them
+        if (strlen(remaining) < (size_t)(len * 2)) 
+        {
+            break;
+        }
+
         char suboption[16] = {0};
         strncpy(suboption, remaining, len);
         remaining += len;
@@ -173,10 +187,22 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
         strncpy(suboption_length_str, remaining, len);
         remaining += len;
 
-        int suboption_length = (int)strtol(suboption_length_str, NULL, 16);
-        int length = suboption_length * val;
+        long suboption_length = strtol(suboption_length_str, NULL, 16);
+        if (suboption_length < 0) 
+        {
+            break;
+        }
 
+        size_t length = (size_t)suboption_length * val;
         char suboption_value[256] = {0};
+        // Bound length against the buffer and the bytes still available
+        if (length >= sizeof(suboption_value) || length > strlen(remaining)) 
+        {
+            DHCPMGR_LOG_ERROR("%s %d: Invalid suboption length %zu, aborting parse\n",
+                              __FUNCTION__, __LINE__, length);
+            break;
+        }
+
         strncpy(suboption_value, remaining, length);
         remaining += length;
 
