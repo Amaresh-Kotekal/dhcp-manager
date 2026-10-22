@@ -29,6 +29,7 @@ Environment="LOG4C_RCPATH=/etc"
 EnvironmentFile=/etc/device.properties
 WorkingDirectory=/usr/ccsp/dhcpmgr
 #ExecStartPre=/bin/sh -c "sleep 30"
+ExecStartPre=-/bin/sh -c '[ -x /usr/ccsp/dhcpmgr/DHCPMgrPSMSentOptionCleanup.sh ] && (/usr/ccsp/dhcpmgr/DHCPMgrPSMSentOptionCleanup.sh)'
 ExecStart=/usr/bin/CcspDHCPMgr -subsys $Subsys
 ExecStop=/usr/bin/killall -9 CcspDHCPMgr
 ExecStopPost=/bin/sh -c 'echo "`date`: Stopping/Restarting CcspDHCPMgr" >> ${PROCESS_RESTART_LOG} && touch /tmp/dhcpmanager_restarted'
