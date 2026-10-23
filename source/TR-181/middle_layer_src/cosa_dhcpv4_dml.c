@@ -751,6 +751,12 @@ Client_GetParamBoolValue
         *pBool   = pDhcpc->Cfg.Restart;
         return TRUE;
     }
+    if(strcmp(ParamName, "X_RDK_Release") == 0)
+    {
+        //X_RDK_Release will be false by default
+        *pBool   = FALSE;
+        return TRUE;
+    }
 
     /* DHCPMGR_LOG_WARNING("Unsupported parameter '%s'\n", ParamName); */
 
@@ -803,9 +809,9 @@ Client_GetParamIntValue
     {
         /* collect value */
         CosaDmlDhcpcGetInfo(NULL, pCxtLink->InstanceNumber, &pDhcpc->Info);
-
-        *pInt   = pDhcpc->Info.LeaseTimeRemaining;
-
+        /* Update LeaseTimeRemaining in-place; on failure, existing value is kept */
+        CosaDmlDhcpcGetLeaseTimeRemaining(&pDhcpc->Info, pDhcpc->Cfg.Interface);
+        *pInt = pDhcpc->Info.LeaseTimeRemaining;
         return TRUE;
     }
 
@@ -1138,7 +1144,10 @@ Client_SetParamBoolValue
                 return FALSE;
             }
             snprintf(DhcpSysEveSet, sizeof(DhcpSysEveSet),"DHCPCV4_ENABLE_%lu", pDhcpc->Cfg.InstanceNumber);
-            commonSyseventSet(DhcpSysEveSet,pDhcpc->Cfg.Interface);
+            if (Dhcp_set_Sysevent_InterfaceEnable(DhcpSysEveSet, pDhcpc->Cfg.Interface, TRUE) != 0)
+            {
+                DHCPMGR_LOG_ERROR("%s %d: Failed to set sysevent %s\n", __FUNCTION__, __LINE__, DhcpSysEveSet);
+            }
         }
         else
         {
@@ -1149,7 +1158,10 @@ Client_SetParamBoolValue
                 return FALSE;
             }
             snprintf(DhcpSysEveSet, sizeof(DhcpSysEveSet),"DHCPCV4_ENABLE_%lu", pDhcpc->Cfg.InstanceNumber);
-            commonSyseventSet(DhcpSysEveSet,"");
+            if (Dhcp_set_Sysevent_InterfaceEnable(DhcpSysEveSet, pDhcpc->Cfg.Interface, FALSE) != 0)
+            {
+                DHCPMGR_LOG_ERROR("%s %d: Failed to set sysevent %s\n", __FUNCTION__, __LINE__, DhcpSysEveSet);
+            }
         }
         ret_mq_send=1;
     }
@@ -1171,7 +1183,8 @@ Client_SetParamBoolValue
 
     if(strcmp(ParamName, "X_RDK_Restart") == 0)
     {
-        if (pDhcpc->Cfg.bEnabled)
+        DHCPMGR_LOG_DEBUG("%s %d Restart parameter set to %s for DHCPv4 Client %s \n", __FUNCTION__, __LINE__, bValue ? "true":"false", pDhcpc->Cfg.Interface );
+        if (pDhcpc->Cfg.bEnabled && bValue)
         {
             DHCPMGR_LOG_INFO("%s %d Restart triggered for DHCPv4 Client %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
             ret_mq_send=1;
@@ -1179,7 +1192,22 @@ Client_SetParamBoolValue
         else
         {
             DHCPMGR_LOG_WARNING("%s %d DHCPv4 Client %s not enabled\n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
-            return FALSE;
+            return TRUE;
+        }
+    }
+
+    if(strcmp(ParamName, "X_RDK_Release") == 0)
+    {
+        DHCPMGR_LOG_DEBUG("%s %d Release parameter set to %s for DHCPv4 Client %s \n", __FUNCTION__, __LINE__, bValue ? "true":"false", pDhcpc->Cfg.Interface );
+        if (pDhcpc->Cfg.bEnabled && bValue)
+        {
+            DHCPMGR_LOG_INFO("%s %d Release triggered for DHCPv4 Client %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
+            ret_mq_send=1;
+        }
+        else
+        {
+            DHCPMGR_LOG_WARNING("%s %d Bydefault the bValue is false or Release triggered for DHCPv4 Client %s when it is disabled \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
+            return TRUE;
         }
     }
 

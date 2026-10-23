@@ -77,6 +77,7 @@
 
 #include "dhcpmgr_controller.h"
 #include "dhcpmgr_rbus_apis.h"
+#include <telemetry_busmessage_sender.h>
 
 #ifdef DHCPV6_SERVER_SUPPORT
 extern void dhcpv6_server_init();
@@ -465,11 +466,20 @@ DHCPMGR_LOG_WARNING("\nAfter Cdm_Init\n");
     DHCPMGR_LOG_INFO("init_dhcp_server_service Ended\n");
 #endif
 
+    DHCPMGR_LOG_INFO("t2_init Init \n");
+    t2_init("dhcp-manager");
+
     DHCPMGR_LOG_INFO("DhcpMgr_Rbus_Init Init \n");
     DhcpMgr_Rbus_Init();
 
     DHCPMGR_LOG_INFO("DhcpMgr_StartMainController Init \n");
-    DhcpMgr_StartMainController();
+    if (DhcpMgr_StartMainController() != 0)
+    {
+        DHCPMGR_LOG_ERROR("DhcpMgr_StartMainController failed - Lease Monitor could not start. "
+                          "Exiting so systemd can restart the process.\n");
+        t2_event_d("DHCPMGR_ERROR_LeaseMonitorFatalExit", 1);
+        exit(1);
+    }
     DHCPMGR_LOG_INFO("DhcpMgr_StartMainController Init Complete\n");
 
     system("touch /tmp/dhcpmgr_initialized");

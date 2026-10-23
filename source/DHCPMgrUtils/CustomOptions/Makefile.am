@@ -30,6 +30,7 @@ libcustomoptions_la_SOURCES = dhcpmgr_custom_options.c
 
 # Include directories
 libcustomoptions_la_CPPFLAGS = -I$(top_srcdir)/source/DHCPServerUtils/utils/include \
-              -I$(top_srcdir)/source/DHCPMgrInterface/include
+              -I$(top_srcdir)/source/DHCPMgrInterface/include \
+              -I$(top_srcdir)/source/DHCPClientUtils/DHCPv4Client/include
 
 

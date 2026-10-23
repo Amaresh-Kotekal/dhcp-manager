@@ -185,7 +185,6 @@ _COSA_DML_MAP_DATA
    UINT32     IPv4Suffix;
    UINT16     IPv4Psid;
    UINT16     IPv4PsidLen;
-   UINT32     Ratio;
    BOOLEAN    bFMR;
 } COSA_DML_MAP_DATA, *PCOSA_DML_MAP_DATA;
 

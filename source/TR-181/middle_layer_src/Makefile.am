@@ -37,4 +37,4 @@ libCcspDhcpMgr_middle_layer_src_la_CPPFLAGS = -I$(top_srcdir)/source/TR-181/incl
                                               -I$(top_srcdir)/source/DHCPClientUtils/DHCPv6Server/include
 
 libCcspDhcpMgr_middle_layer_src_la_SOURCES = cosa_dhcpv4_internal.c cosa_dhcpv6_internal.c plugin_main.c cosa_apis_util.c cosa_dhcpv4_dml.c cosa_dhcpv6_dml.c cosa_webconfig_api.c cosa_x_cisco_com_devicecontrol_internal.c dhcpmgr_rbus_apis.c
-libCcspDhcpMgr_middle_layer_src_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lsecure_wrapper
+libCcspDhcpMgr_middle_layer_src_la_LDFLAGS = -lccsp_common -lsyscfg -lsysevent -lsecure_wrapper -ltelemetry_msgsender

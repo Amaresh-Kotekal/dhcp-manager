@@ -88,6 +88,19 @@ __attribute__((weak)) int Get_DhcpV6_CustomOption17(const char *ifName, char *Op
     return -1;
 }
 
+__attribute__((weak)) int Get_DhcpV6_CustomOption_25(dhcp_opt_list ** send_opt_list)
+{
+    if (send_opt_list == NULL)
+    {
+        return RETURN_ERR;
+    }
+
+    DHCPMGR_LOG_INFO("%s %d Weak implementation of Get_DhcpV6_CustomOption_25 \n", __FUNCTION__, __LINE__);
+
+    //Assigning NULL, so that the DHCP server can assign a prefix based on the availability
+    return add_dhcp_opt_to_list(send_opt_list, DHCPV6_OPT_25, NULL);
+}
+
 __attribute__((weak)) int Set_DhcpV6_CustomOption17(const char *ifName, const char *OptionValue, uint32_t *ipv6_TimeOffset) 
 {
     DHCPMGR_LOG_INFO("%s %d Weak implementation of Set_DhcpV6_CustomOption17 \n", __FUNCTION__, __LINE__);
@@ -120,6 +133,12 @@ __attribute__((weak)) int Set_DhcpV4_CustomOption43(const char *ifName, const ch
  * 
  * @return A pointer to a dynamically allocated string containing the parsed suboption value.
  *         The caller is responsible for freeing the allocated memory.
+ *
+ * RDKB-67443: Harden option 17 parsing. Delete colons (instead of replacing
+ * them with spaces) so the fixed-width hex fields stay aligned, and bound the
+ * suboption length against the destination buffer and the remaining input
+ * before copying. Previously a crafted length (e.g. 0xff) caused a stack
+ * buffer overflow and crashed CcspDHCPMgr.
  */
 static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip_mode) 
 {
@@ -137,14 +156,16 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
         return NULL;
     }
 
-    // Remove colons from the input string
+    // Delete colons from the input string so the fixed-width hex fields align
+    char *write_ptr = dhcp_option_copy;
     for (char *p = dhcp_option_copy; *p; ++p) 
     {
-        if (*p == ':') 
+        if (*p != ':') 
         {
-            *p = ' ';
+            *write_ptr++ = *p;
         }
     }
+    *write_ptr = '\0';
 
     int val = 2;
     int len = (strcmp(ip_mode, "v4") == 0) ? 2 : 4;
@@ -152,6 +173,12 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
     char *remaining = dhcp_option_copy;
     while (*remaining != '\0') 
     {
+        // Need the id and length fields before reading them
+        if (strlen(remaining) < (size_t)(len * 2)) 
+        {
+            break;
+        }
+
         char suboption[16] = {0};
         strncpy(suboption, remaining, len);
         remaining += len;
@@ -160,10 +187,22 @@ static char* parse_dhcp_17_suboption(const char *dhcp_option_val, const char *ip
         strncpy(suboption_length_str, remaining, len);
         remaining += len;
 
-        int suboption_length = (int)strtol(suboption_length_str, NULL, 16);
-        int length = suboption_length * val;
+        long suboption_length = strtol(suboption_length_str, NULL, 16);
+        if (suboption_length < 0) 
+        {
+            break;
+        }
 
+        size_t length = (size_t)suboption_length * val;
         char suboption_value[256] = {0};
+        // Bound length against the buffer and the bytes still available
+        if (length >= sizeof(suboption_value) || length > strlen(remaining)) 
+        {
+            DHCPMGR_LOG_ERROR("%s %d: Invalid suboption length %zu, aborting parse\n",
+                              __FUNCTION__, __LINE__, length);
+            break;
+        }
+
         strncpy(suboption_value, remaining, length);
         remaining += length;
 
@@ -263,10 +302,22 @@ static int DhcpMgr_Option17Set_Common(const char *ifName, const char *OptionValu
             } else if (strcmp(suboption, "38") == 0) 
             {
                 DHCPMGR_LOG_INFO("Suboption TimeOffset is %s in option %s\n", suboption_data, OptionValue);
-                *ipv6_TimeOffset = atoi(suboption_data);
-                DHCPMGR_LOG_INFO("ipv6_TimeOffset value is %u\n", *ipv6_TimeOffset);
-                //ifl_set_event("ipv6-timeoffset", suboption_data);
-                // Additional processing for TimeOffset can be added here
+                /* DHCPv6 TimeOffset (suboption 38) is a 32-bit signed big-endian value
+                 * transmitted as colon-separated hex bytes (e.g. "ff:ff:b9:b0" = -18000). */
+                unsigned int b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+                if (sscanf(suboption_data, "%02x:%02x:%02x:%02x", &b0, &b1, &b2, &b3) == 4)
+                {
+                    /* Reconstruct 32-bit value; store bit pattern as uint32_t
+                     * (e.g. -18000 = 0xFFFFB9B0). Cast to int32_t when interpreting as signed. */
+                    *ipv6_TimeOffset = ((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) |
+                                       ((uint32_t)b2 << 8)  |  (uint32_t)b3;
+                }
+                else
+                {
+                    DHCPMGR_LOG_ERROR("Failed to parse TimeOffset hex bytes: %s\n", suboption_data);
+                    *ipv6_TimeOffset = 0;
+                }
+                DHCPMGR_LOG_INFO("ipv6_TimeOffset value is %d seconds\n", (int32_t)*ipv6_TimeOffset);
             } else if (strcmp(suboption, "39") == 0) 
             {
                 DHCPMGR_LOG_INFO("Suboption IP Mode Preference is %s in option %s\n", suboption_data, OptionValue);

@@ -117,6 +117,12 @@
             <writable>true</writable>
           </parameter>
           <parameter>
+            <name>X_RDK_Release</name>
+            <type>boolean</type>
+            <syntax>bool</syntax>
+            <writable>true</writable>
+          </parameter>
+          <parameter>
             <name>IPAddress</name>
             <type>string</type>
             <syntax>uint32/ip4_addr</syntax>
@@ -844,6 +850,12 @@
           </parameter>
           <parameter>
             <name>X_RDK_Restart</name>
+            <type>boolean</type>
+            <syntax>bool</syntax>
+            <writable>true</writable>
+          </parameter>
+          <parameter>
+            <name>X_RDK_Release</name>
             <type>boolean</type>
             <syntax>bool</syntax>
             <writable>true</writable>

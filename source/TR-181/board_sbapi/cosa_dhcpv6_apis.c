@@ -1827,7 +1827,7 @@ CosaDmlDhcpv6cGetEntry
     char param_name[256]  = {0};
     char param_value[256] = {0};
     int retPsmGet = CCSP_SUCCESS;
-    char DhcpStateSys[64] = {0};
+    //char DhcpStateSys[64] = {0};
     /* Cfg Memebers */
     pEntry->Cfg.InstanceNumber = ulIndex;
 
@@ -1966,9 +1966,6 @@ CosaDmlDhcpv6cGetEntry
     Utopia_RawGet(&utctx,NULL,buf,out,sizeof(out));
     pEntry->Cfg.bEnabled = (out[0] == '1') ? TRUE:FALSE;*/
 
-    //This is for Crash Recovery purpose
-    
-
     rc = strcpy_s(buf, sizeof(buf), SYSCFG_FORMAT_DHCP6C"_iana_enabled");
     ERR_CHK(rc);
     memset(out, 0, sizeof(out));
@@ -1990,39 +1987,9 @@ CosaDmlDhcpv6cGetEntry
     Utopia_Free(&utctx,0);
 #endif
 
-    _ansc_memset(param_name, 0, sizeof(param_name));
-    _ansc_sprintf(param_name, "DHCPCV6_ENABLE_%lu", ulIndex);
-    int ret = commonSyseventGet(param_name, DhcpStateSys, sizeof(DhcpStateSys));
-    if (ret == 0 && DhcpStateSys[0] != '\0')
-    {
-        pEntry->Cfg.bEnabled = TRUE;
-        errno_t rc = strcpy_s(pEntry->Cfg.Interface, sizeof(pEntry->Cfg.Interface), DhcpStateSys);  
-        if (rc != EOK)  
-        {  
-            DHCPMGR_LOG_ERROR("%s:%d Failed to copy DHCPv6 interface name (err=%d)\n", __FUNCTION__, __LINE__, rc);  
-            /* Ensure interface name is empty and disable client on failure */  
-            pEntry->Cfg.Interface[0] = '\0';  
-            pEntry->Cfg.bEnabled = FALSE;  
-        }  
-    }
-    else
-    {
-        pEntry->Cfg.bEnabled = FALSE;
-    }
-
-    /*Info members*/
     if (pEntry->Cfg.bEnabled)
     {
-        //setting status to disabled incase of DHCPManager Crash Recovery to restart the process
-        //if already running before the crash
-        if (DhcpStateSys[0] != '\0')
-        {
-            pEntry->Info.Status = COSA_DML_DHCP_STATUS_Disabled;
-        }
-        else
-        {
-            pEntry->Info.Status = COSA_DML_DHCP_STATUS_Enabled;
-        }
+       pEntry->Info.Status = COSA_DML_DHCP_STATUS_Enabled;
     }
     else
     {

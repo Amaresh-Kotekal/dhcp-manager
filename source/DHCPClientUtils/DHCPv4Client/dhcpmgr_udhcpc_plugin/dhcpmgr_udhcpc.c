@@ -2,31 +2,38 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "util.h"
 #include "udhcpc_msg.h"
 
-
-#if 0  // Uncomment the following code to enable plugin logs
-
-#define PLUGIN_DBG_PRINT(fmt ...)     {\
-    FILE     *fp        = NULL;\
-    fp = fopen ( "/rdklogs/logs/DHCPMGRLog.txt.0", "a+");\
+/* Plugin is a standalone binary without rdklogger init, use direct file logging */
+#define PLUGIN_DBG_PRINT(level, fmt, ...)     do {\
+    int _fd = open("/rdklogs/logs/DHCPMGRLog.txt.0", O_WRONLY | O_CREAT | O_APPEND, 0640);\
+    FILE *fp = (_fd >= 0) ? fdopen(_fd, "a") : NULL;\
+    if (_fd >= 0 && fp == NULL) close(_fd);\
     if (fp)\
     {\
-        fprintf(fp,fmt);\
+        struct timeval tv;\
+        struct tm tm_info;\
+        gettimeofday(&tv, NULL);\
+        localtime_r(&tv.tv_sec, &tm_info);\
+        fprintf(fp, "%02d%02d%02d-%02d:%02d:%02d.%06ld [mod=DHCPMGR, lvl=%s] " fmt,\
+                tm_info.tm_year % 100, tm_info.tm_mon + 1, tm_info.tm_mday,\
+                tm_info.tm_hour, tm_info.tm_min, tm_info.tm_sec, (long)tv.tv_usec,\
+                level, ##__VA_ARGS__);\
         fclose(fp);\
     }\
-}\
+} while(0)
 
 #undef DHCPMGR_LOG_INFO
 #undef DHCPMGR_LOG_ERROR
-#undef DHCPMGR_LOG_DEBUG
 #undef DHCPMGR_LOG_WARNING
-#define DHCPMGR_LOG_INFO(fmt, ...)     PLUGIN_DBG_PRINT(fmt, ##__VA_ARGS__)
-#define DHCPMGR_LOG_ERROR(fmt, ...)    PLUGIN_DBG_PRINT(fmt, ##__VA_ARGS__)
-#define DHCPMGR_LOG_DEBUG(fmt, ...)    PLUGIN_DBG_PRINT(fmt, ##__VA_ARGS__)
-#define DHCPMGR_LOG_WARNING(fmt, ...)  PLUGIN_DBG_PRINT(fmt, ##__VA_ARGS__)
-#endif
+#define DHCPMGR_LOG_INFO(fmt, ...)     PLUGIN_DBG_PRINT("INFO", fmt, ##__VA_ARGS__)
+#define DHCPMGR_LOG_ERROR(fmt, ...)    PLUGIN_DBG_PRINT("ERROR", fmt, ##__VA_ARGS__)
+#define DHCPMGR_LOG_WARNING(fmt, ...)  PLUGIN_DBG_PRINT("WARN", fmt, ##__VA_ARGS__)
 
 typedef struct udhcpc_env_t
 {
@@ -233,18 +240,8 @@ static int get_and_fill_env_data (DHCPv4_PLUGIN_MSG *dhcpv4_data, udhcpc_env_t* 
             DHCPMGR_LOG_ERROR("[%s-%d] Rebinding time is not available in dhcp ack \n",  __FUNCTION__,__LINE__);
         }
 
-        /** TimeZone. */
-        if ((env = getenv(DHCP_TIMEZONE)) != NULL)
-        {
-            strncpy(dhcpv4_data->timeZone, env, sizeof(dhcpv4_data->timeZone));
-        }
-        else
-        {
-            DHCPMGR_LOG_ERROR("[%s-%d] Timezone is not available in dhcp ack \n",  __FUNCTION__,__LINE__);
-        }
-
         /** Timeoffset. */
-        if ((env = getenv(DHCP_TIMEOFFSET)) != NULL)
+        if ((env = getenv(DHCP_TIMEZONE)) != NULL)
         {
             dhcpv4_data->timeOffset = (int32_t) atoi(env);
             dhcpv4_data->isTimeOffsetAssigned = 1;
@@ -418,15 +415,18 @@ static int send_dhcp4_data_to_leaseMonitor (DHCPv4_PLUGIN_MSG *dhcpv4_data)
         if (bytes < 0)
         {
             sleep(1);
-            DHCPMGR_LOG_ERROR("[%s-%d] Failed to send data to the dhcpmanager error=[%d][%s] \n", __FUNCTION__, __LINE__,errno, strerror(errno));
+            DHCPMGR_LOG_WARNING("[%s-%d] Sending to dhcpmanager (attempt %d/%d) error=[%d][%s], retrying...\n", __FUNCTION__, __LINE__, i+1, MAX_SEND_THRESHOLD, errno, strerror(errno));
         }
         else
             break;
     }
 
-    DHCPMGR_LOG_INFO("Successfully send %d bytes to dhcpmanager \n", bytes);
+    if (bytes > 0)
+        DHCPMGR_LOG_INFO("[%s-%d] Successfully sent %d bytes to dhcpmanager \n", __FUNCTION__, __LINE__, bytes);
+    else
+        DHCPMGR_LOG_ERROR("[%s-%d] Failed to send data after %d attempts \n", __FUNCTION__, __LINE__, MAX_SEND_THRESHOLD);
     nn_close(sock);
-    return 0;
+    return (bytes > 0) ? 0 : -1;
 }
 
 static int handle_events (udhcpc_env_t *pinfo)

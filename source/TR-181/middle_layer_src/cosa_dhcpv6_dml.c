@@ -76,7 +76,9 @@
 #include "cosa_apis_util.h"
 #include "util.h"
 
+#include <errno.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <unistd.h>
 
 #define MIN 60
@@ -717,6 +719,13 @@ Client3_GetParamBoolValue
         return TRUE;
     }
 
+    if(strcmp(ParamName, "X_RDK_Release") == 0)
+    {
+        //X_RDK_Release will be false by default
+        *pBool   = FALSE;
+        return TRUE;
+    }
+
     return FALSE;
 }
 
@@ -1003,7 +1012,7 @@ Client3_SetParamBoolValue
         {
             char DhcpSysEveSet[64] = {0};
             snprintf(DhcpSysEveSet, sizeof(DhcpSysEveSet),"DHCPCV6_ENABLE_%lu", pDhcpc->Cfg.InstanceNumber);
-            if(commonSyseventSet(DhcpSysEveSet,pDhcpc->Cfg.Interface) != 0)
+             if (Dhcp_set_Sysevent_InterfaceEnable(DhcpSysEveSet, pDhcpc->Cfg.Interface, TRUE) != 0)
             {
                 DHCPMGR_LOG_ERROR("%s %d: Failed to set sysevent %s\n", __FUNCTION__, __LINE__, DhcpSysEveSet);
                 //don't return FALSE here as we still want to update the event and act accordingly
@@ -1013,7 +1022,7 @@ Client3_SetParamBoolValue
         {
             char DhcpSysEveSet[64] = {0};
             snprintf(DhcpSysEveSet, sizeof(DhcpSysEveSet),"DHCPCV6_ENABLE_%lu", pDhcpc->Cfg.InstanceNumber);
-            if(commonSyseventSet(DhcpSysEveSet,"") != 0)
+            if (Dhcp_set_Sysevent_InterfaceEnable(DhcpSysEveSet, pDhcpc->Cfg.Interface, FALSE) != 0)
             {
                 DHCPMGR_LOG_ERROR("%s %d: Failed to set sysevent %s\n", __FUNCTION__, __LINE__, DhcpSysEveSet);
                 //don't return FALSE here as we still want to update the event and act accordingly
@@ -1061,7 +1070,8 @@ Client3_SetParamBoolValue
 
     if(strcmp(ParamName, "X_RDK_Restart") == 0)
     {
-        if(pDhcpc->Cfg.bEnabled)
+        DHCPMGR_LOG_DEBUG("%s %d Restart parameter value is %d when DHCPv6 is %d\n", __FUNCTION__, __LINE__, bValue, pDhcpc->Cfg.bEnabled);
+        if(pDhcpc->Cfg.bEnabled && bValue)
         {
             DHCPMGR_LOG_INFO("%s %d Restart triggered for DHCPv6 Client %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
             ret_mq_send=1;
@@ -1069,7 +1079,22 @@ Client3_SetParamBoolValue
         else
         {
             DHCPMGR_LOG_WARNING("%s %d Restart triggered for DHCPv6 Client %s when it is disabled \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
-            return FALSE;
+            return TRUE;
+        }
+    }
+
+    if(strcmp(ParamName, "X_RDK_Release") == 0)
+    {
+        DHCPMGR_LOG_DEBUG("%s %d Release parameter value is %d when DHCPv6 is %d\n", __FUNCTION__, __LINE__, bValue, pDhcpc->Cfg.bEnabled);
+        if(pDhcpc->Cfg.bEnabled && bValue)
+        {
+            DHCPMGR_LOG_INFO("%s %d Release triggered for DHCPv6 Client %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
+            ret_mq_send=1;
+        }
+        else
+        {
+            DHCPMGR_LOG_WARNING("%s %d Bydefault the bValue is false or Release triggered for DHCPv6 Client %s when it is disabled \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface );
+            return TRUE;
         }
     }
 
@@ -3269,21 +3294,17 @@ dhcp6c_mapt_mape_GetParamBoolValue
         BOOL*                       pBool
     )
 {
+    (void)hInsContext;
+    char temp[16] = {0};
 
-    PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT pCxtLink        = (PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT)hInsContext;
-    PCOSA_DML_DHCPCV6_FULL            pDhcpc          = (PCOSA_DML_DHCPCV6_FULL)pCxtLink->hContext;
-      
-    const DML_DHCPCV6_MAP_INFO    *MapInfo = &(pDhcpc->Info.MapInfo);
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "MapIsFMR") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        *pBool = FALSE;
+        if (commonSyseventGet(SYSEVENT_MAP_IS_FMR, temp, sizeof(temp)) == 0)
         {
-                *pBool  = MapInfo->IsFMR;
+            *pBool = (strcasecmp(temp, "TRUE") == 0) ? TRUE : FALSE;
         }
-        else
-            *pBool  = FALSE;
-
         return TRUE;
     }
 
@@ -3328,53 +3349,83 @@ dhcp6c_mapt_mape_GetParamUlongValue
         ULONG*                      puLong
     )
 {
-    PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT pCxtLink        = (PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT)hInsContext;
-    PCOSA_DML_DHCPCV6_FULL            pDhcpc          = (PCOSA_DML_DHCPCV6_FULL)pCxtLink->hContext;
-      
-    const DML_DHCPCV6_MAP_INFO    *MapInfo = &(pDhcpc->Info.MapInfo);
+    (void)hInsContext;
+    char temp[64] = {0};
+    char* endPtr = NULL;
+
     *puLong = 0; /* default value */
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "MapEALen") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        if (commonSyseventGet(SYSEVENT_MAP_EA_LEN, temp, sizeof(temp)) == 0)
         {
-           *puLong  = MapInfo->MapEALen;
+            errno = 0;
+            *puLong = strtoul(temp, &endPtr, 10);
+            if (errno != 0 || endPtr == temp || *endPtr != '\0' || temp[0] == '-')
+            {
+                DHCPMGR_LOG_ERROR("%s: invalid numeric value '%s' for %s", __FUNCTION__, temp, SYSEVENT_MAP_EA_LEN);
+                *puLong = 0;
+            }
         }
         return TRUE;
     }
 
     if (strcmp(ParamName, "MapPSIDOffset") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        if (commonSyseventGet(SYSEVENT_MAPT_PSID_OFFSET, temp, sizeof(temp)) == 0)
         {
-           *puLong  = MapInfo->MapPSIDOffset;
+            errno = 0;
+            *puLong = strtoul(temp, &endPtr, 10);
+            if (errno != 0 || endPtr == temp || *endPtr != '\0' || temp[0] == '-')
+            {
+                DHCPMGR_LOG_ERROR("%s: invalid numeric value '%s' for %s", __FUNCTION__, temp, SYSEVENT_MAPT_PSID_OFFSET);
+                *puLong = 0;
+            }
         }
         return TRUE;
     }
 
     if (strcmp(ParamName, "MapPSIDLen") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        if (commonSyseventGet(SYSEVENT_MAPT_PSID_LENGTH, temp, sizeof(temp)) == 0)
         {
-           *puLong  = MapInfo->MapPSIDLen;
+            errno = 0;
+            *puLong = strtoul(temp, &endPtr, 10);
+            if (errno != 0 || endPtr == temp || *endPtr != '\0' || temp[0] == '-')
+            {
+                DHCPMGR_LOG_ERROR("%s: invalid numeric value '%s' for %s", __FUNCTION__, temp, SYSEVENT_MAPT_PSID_LENGTH);
+                *puLong = 0;
+            }
         }
         return TRUE;
     }
 
     if (strcmp(ParamName, "MapPSID") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        if (commonSyseventGet(SYSEVENT_MAPT_PSID_VALUE, temp, sizeof(temp)) == 0)
         {
-           *puLong  = MapInfo->MapPSIDValue;
+            errno = 0;
+            *puLong = strtoul(temp, &endPtr, 10);
+            if (errno != 0 || endPtr == temp || *endPtr != '\0' || temp[0] == '-')
+            {
+                DHCPMGR_LOG_ERROR("%s: invalid numeric value '%s' for %s", __FUNCTION__, temp, SYSEVENT_MAPT_PSID_VALUE);
+                *puLong = 0;
+            }
         }
         return TRUE;
     }
 
     if (strcmp(ParamName, "MapRatio") == 0)
     {
-        if(MapInfo->MaptAssigned || MapInfo->MapeAssigned)
+        if (commonSyseventGet(SYSEVENT_MAPT_RATIO, temp, sizeof(temp)) == 0)
         {
-           *puLong  = MapInfo->MapRatio;
+            errno = 0;
+            *puLong = strtoul(temp, &endPtr, 10);
+            if (errno != 0 || endPtr == temp || *endPtr != '\0' || temp[0] == '-')
+            {
+                DHCPMGR_LOG_ERROR("%s: invalid numeric value '%s' for %s", __FUNCTION__, temp, SYSEVENT_MAPT_RATIO);
+                *puLong = 0;
+            }
         }
         return TRUE;
     }
@@ -3429,28 +3480,19 @@ dhcp6c_mapt_mape_GetParamStringValue
         ULONG*                      pUlSize
     )
 {
-    PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT pCxtLink        = (PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT)hInsContext;
-    PCOSA_DML_DHCPCV6_FULL            pDhcpc          = (PCOSA_DML_DHCPCV6_FULL)pCxtLink->hContext;
-      
-    const DML_DHCPCV6_MAP_INFO    *MapInfo = &(pDhcpc->Info.MapInfo);
+    (void)hInsContext;
+
+    char temp[256] = {0};
     AnscCopyString(pValue, ""); // default value
 
     /* check the parameter name and return the corresponding value */
     if (strcmp(ParamName, "MapTransportMode") == 0)
     {
-        char *temp;
-        if( MapInfo->MaptAssigned )
+        if (commonSyseventGet(SYSEVENT_MAP_TRANSPORT_MODE, temp, sizeof(temp)) != 0 || temp[0] == '\0')
         {
-            temp = "MAPT";
+            snprintf(temp, sizeof(temp), "%s", "NONE");
         }
-        else if( MapInfo->MapeAssigned )
-        {
-            temp = "MAPE";
-        }
-        else
-        {
-            temp = "NON-MAP";
-        }
+
         if ( AnscSizeOfString(temp) < *pUlSize)
         {
             AnscCopyString(pValue, temp);
@@ -3465,53 +3507,7 @@ dhcp6c_mapt_mape_GetParamStringValue
 
     if (strcmp(ParamName, "MapBRPrefix") == 0)
     {
-
-        if ( AnscSizeOfString((const char *)MapInfo->MapBRPrefix) < *pUlSize)
-        {
-            AnscCopyString(pValue, (const char *)MapInfo->MapBRPrefix);
-            return 0;
-        }
-        else
-        {
-            *pUlSize = AnscSizeOfString((const char *)MapInfo->MapBRPrefix)+1;
-            return 1;
-        }
-    }
-
-    if (strcmp(ParamName, "MapRuleIPv4Prefix") == 0)
-    {
-        if ( AnscSizeOfString((const char *)MapInfo->MapRuleIPv4Prefix) < *pUlSize)
-        {
-            AnscCopyString(pValue,(const char *) MapInfo->MapRuleIPv4Prefix);
-            return 0;
-        }
-        else
-        {
-            *pUlSize = AnscSizeOfString((const char *)MapInfo->MapRuleIPv4Prefix)+1;
-            return 1;
-        }
-    }
-
-    if (strcmp(ParamName, "MapRuleIPv6Prefix") == 0)
-    {
-        if ( AnscSizeOfString((const char *)MapInfo->MapRuleIPv6Prefix) < *pUlSize)
-        {
-            AnscCopyString(pValue, (const char *)MapInfo->MapRuleIPv6Prefix);
-            return 0;
-        }
-        else
-        {
-            *pUlSize = AnscSizeOfString((const char *)MapInfo->MapRuleIPv6Prefix)+1;
-            return 1;
-        }
-    }
-
-    if (strcmp(ParamName, "MapIpv4Address") == 0)
-    {
-        //TODO: This is a temporary solution, need to use the BBF MAP. DML from the WanManager
-        DHCPMGR_LOG_ERROR("%s %d MapIpv4Address not available in this context. returning from the device's sysvent db\n", __FUNCTION__, __LINE__);
-        char temp[256] = {0};
-        commonSyseventGet(SYSEVENT_MAPT_IPADDRESS, temp, sizeof(temp));
+        (void)commonSyseventGet(SYSEVENT_MAP_BR_IPV6_PREFIX, temp, sizeof(temp));
         if ( AnscSizeOfString(temp) < *pUlSize)
         {
             AnscCopyString(pValue, temp);
@@ -3522,7 +3518,51 @@ dhcp6c_mapt_mape_GetParamStringValue
             *pUlSize = AnscSizeOfString(temp)+1;
             return 1;
         }
-        return 0;
+    }
+
+    if (strcmp(ParamName, "MapRuleIPv4Prefix") == 0)
+    {
+        (void)commonSyseventGet(SYSEVENT_MAP_RULE_IPADDRESS, temp, sizeof(temp));
+        if ( AnscSizeOfString(temp) < *pUlSize)
+        {
+            AnscCopyString(pValue, temp);
+            return 0;
+        }
+        else
+        {
+            *pUlSize = AnscSizeOfString(temp)+1;
+            return 1;
+        }
+    }
+
+    if (strcmp(ParamName, "MapRuleIPv6Prefix") == 0)
+    {
+        (void)commonSyseventGet(SYSEVENT_MAP_RULE_IPV6_ADDRESS, temp, sizeof(temp));
+        if ( AnscSizeOfString(temp) < *pUlSize)
+        {
+            AnscCopyString(pValue, temp);
+            return 0;
+        }
+        else
+        {
+            *pUlSize = AnscSizeOfString(temp)+1;
+            return 1;
+        }
+    }
+
+    if (strcmp(ParamName, "MapIpv4Address") == 0)
+    {
+        (void)commonSyseventGet(SYSEVENT_MAPT_IPADDRESS, temp, sizeof(temp));
+        if ( AnscSizeOfString(temp) < *pUlSize)
+        {
+            AnscCopyString(pValue, temp);
+            return 0;
+        }
+        else
+        {
+            *pUlSize = AnscSizeOfString(temp)+1;
+            return 1;
+        }
     }
 
     return -1;

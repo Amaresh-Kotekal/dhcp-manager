@@ -83,7 +83,7 @@
 #include "cosa_apis_util.h"
 #include "util.h"
 #include "dhcp_client_common_utils.h"
-#include "cosa_dhcpv4_internal.h"
+#include <sys/sysinfo.h>
 #include "cosa_dhcpv4_dml.h"
 
 #if ( defined _COSA_SIM_ )
@@ -1140,27 +1140,16 @@ CosaDmlDhcpcGetCfg
     {
         return ANSC_STATUS_FAILURE;
     }
-
-    //Required for the crash Recovery
-    char DhcpStateSys[64] = {0};
-    _ansc_sprintf(param_name, "DHCPCV4_ENABLE_%d", instancenum);
-    int ret = commonSyseventGet(param_name, DhcpStateSys, sizeof(DhcpStateSys));
-    if (ret == 0 && DhcpStateSys[0] != '\0')
+    pCfg->bEnabled = FALSE;
+    commonSyseventGet("current_wan_ifname", ifname, sizeof(ifname));
+    if (strlen(ifname) > 0)
     {
-        pCfg->bEnabled = TRUE;
-        strcpy_s(pCfg->Interface, sizeof(pCfg->Interface), DhcpStateSys);
+        pCfg->Interface[0] = 0;
     }
     else
     {
-        pCfg->bEnabled = FALSE;
-        commonSyseventGet("current_wan_ifname", ifname, sizeof(ifname));
-        if (strlen(ifname) > 0)
-               pCfg->Interface[0] = 0;
-        else
-        {
-                rc = strcpy_s(pCfg->Interface, sizeof(pCfg->Interface), ifname);
-                ERR_CHK(rc);
-        }
+        rc = strcpy_s(pCfg->Interface, sizeof(pCfg->Interface), ifname);
+        ERR_CHK(rc);
     }
     _PSM_READ_PARAM(PSM_DHCPMANAGER_CLIENTALIAS);
     if (retPsmGet == CCSP_SUCCESS)
@@ -1223,6 +1212,63 @@ CosaDmlDhcpcGetInfo
         }
     }
     
+    return ANSC_STATUS_SUCCESS;
+}
+
+/*
+ * CosaDmlDhcpcGetLeaseTimeRemaining
+ *
+ * Reads lease duration and lease start uptime from sysevent,
+ * subtracts elapsed uptime, and updates pDhcpc->Info.LeaseTimeRemaining.
+ */
+ANSC_STATUS
+CosaDmlDhcpcGetLeaseTimeRemaining
+    (
+        PCOSA_DML_DHCPC_INFO        pInfo,
+        char                       *ifname
+    )
+{
+    char queryBuf[32]     = {0};
+    char syseventKey[128] = {0};
+    UINT startTime = 0, leaseTime = 0, upTime = 0;
+
+    if (!pInfo || !ifname || ifname[0] == '\0')
+    {
+        DHCPMGR_LOG_ERROR("%s %d: pInfo is NULL or interface name is empty\n", __FUNCTION__, __LINE__);
+        return ANSC_STATUS_FAILURE;
+    }
+
+    /* Get total lease duration from sysevent */
+    snprintf(syseventKey, sizeof(syseventKey), "ipv4_%s_lease_time", ifname);
+    if ((commonSyseventGet(syseventKey, queryBuf, sizeof(queryBuf)) != 0) ||
+        (queryBuf[0] == '\0'))
+    {
+        /* lease_time not yet available, leave LeaseTimeRemaining unchanged */
+        return ANSC_STATUS_FAILURE;
+    }
+    leaseTime = (UINT)atoi(queryBuf);
+
+    /* Get lease start uptime from sysevent */
+    memset(queryBuf, 0, sizeof(queryBuf));
+    snprintf(syseventKey, sizeof(syseventKey), "ipv4_%s_start_time", ifname);
+    if ((commonSyseventGet(syseventKey, queryBuf, sizeof(queryBuf)) != 0) ||
+        (queryBuf[0] == '\0'))
+    {
+        /* start_time not yet available, leave LeaseTimeRemaining unchanged */
+        return ANSC_STATUS_FAILURE;
+    }
+    startTime = (UINT)atoi(queryBuf);
+
+    struct sysinfo si;
+    if (sysinfo(&si) != 0)
+    {
+        DHCPMGR_LOG_ERROR("%s %d: sysinfo() failed\n", __FUNCTION__, __LINE__);
+        return ANSC_STATUS_FAILURE;
+    }
+    upTime = (UINT)si.uptime;
+
+    UINT elapsed = (upTime >= startTime) ? (upTime - startTime) : 0;
+    pInfo->LeaseTimeRemaining = (leaseTime > elapsed) ? (int)(leaseTime - elapsed) : 0;
     return ANSC_STATUS_SUCCESS;
 }
 

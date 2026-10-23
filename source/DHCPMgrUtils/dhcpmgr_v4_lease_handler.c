@@ -356,6 +356,9 @@ void DhcpMgr_ProcessV4Lease(PCOSA_DML_DHCPC_FULL pDhcpc)
                 DhcpMgr_PublishDhcpV4Event(pDhcpc, DHCP_LEASE_DEL);
                 continue;
             }
+            //If DHCP server is not sending MTU, setting the default value of 1500. Can't set 0 as MTU
+            if(newLease->mtuSize == 0)
+                newLease->mtuSize = 1500;
             DHCPMGR_LOG_INFO("%s %d: NewLease->address %s  \n",__FUNCTION__, __LINE__, newLease->address);
             DHCPMGR_LOG_INFO("%s %d: NewLease->netmask %s  \n",__FUNCTION__, __LINE__, newLease->netmask);
             DHCPMGR_LOG_INFO("%s %d: NewLease->gateway %s  \n",__FUNCTION__, __LINE__, newLease->gateway );

@@ -23,6 +23,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <time.h>
+#include <telemetry_busmessage_sender.h>
 
 #define UDHCPC_CLIENT                    "udhcpc"
 #define UDHCPC_CLIENT_PATH               "/sbin/"UDHCPC_CLIENT
@@ -310,6 +311,11 @@ pid_t start_dhcpv4_client(char *interfaceName, dhcp_opt_list *req_opt_list, dhcp
 #endif
     struct timespec ts = {2, 0};
     nanosleep(&ts, NULL);
+    if (udhcpc_pid <= 0)
+    {
+        DHCPMGR_LOG_ERROR("%s %d: unable to start udhcpc-client %d.\n", __FUNCTION__, __LINE__, udhcpc_pid);
+        t2_event_d("DHCPMGR_ERROR_Dhcpv4ClientStartFail", 1);
+    }
     return udhcpc_pid;
 }
 

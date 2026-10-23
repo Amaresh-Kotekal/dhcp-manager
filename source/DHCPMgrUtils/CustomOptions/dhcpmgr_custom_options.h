@@ -21,6 +21,7 @@
 #define DHCP_CUSTOM_OPTIONS_H
 #include <stdlib.h>
 #include <stdint.h>
+#include "dhcp_client_common_utils.h"
 /**
  * @brief Creates a custom DHCPv4 Option 43 (Vendor Specific Information) at runtime.
  *
@@ -89,6 +90,17 @@ int Get_DhcpV6_CustomOption16(const char *ifName, char *OptionValue, size_t Opti
  * @return int 0 on success, non-zero on failure.
  */
 int Get_DhcpV6_CustomOption17(const char *ifName, char *OptionValue, size_t OptionValueSize);
+
+/**
+ * @brief Adds DHCPv6 Option 25 (IA_PD) to the send option list.
+ *
+ * This function provides a weak default implementation that can be overridden
+ * by platform code at link time.
+ *
+ * @param[in,out] send_opt_list Pointer to the DHCPv6 send option list.
+ * @return int 0 on success, non-zero on failure.
+ */
+int Get_DhcpV6_CustomOption_25(dhcp_opt_list **send_opt_list);
 
 /**
  * @brief Sets the custom DHCPv6 Option 17 (Vendor Specific Information Option) value.

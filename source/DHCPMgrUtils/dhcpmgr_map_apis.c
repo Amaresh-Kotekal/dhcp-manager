@@ -38,6 +38,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdint.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <netinet/in.h>
@@ -197,11 +198,13 @@ CosaDmlMapParseResponse
                 */
                bytesLeftOut = uiOptionLen - 8 - v6ByteLen - (v6BitLen?1:0);
 
-               g_stMapData.Ratio = 1 << (g_stMapData.EaLen -
-                                                    (BUFLEN_32 - g_stMapData.RuleIPv4PrefixLen));
-               /* RFC default */
+               /*
+                * RFC default for PSID offset applies when the optional
+                * S46 Port Params suboption is not present. Keep the default
+                * here and let the suboption parser overwrite it with the
+                * received value, including 0 when that is explicitly encoded.
+                */
                g_stMapData.PsidOffset = 6;
-               MAP_LOG_INFO("<<<TRACE>>> g_stMapData.Ratio             : %u", g_stMapData.Ratio);
                MAP_LOG_INFO("<<<TRACE>>> bytesLeftOut                   : %u", bytesLeftOut);
                if ( bytesLeftOut > 0 )
                {
@@ -218,14 +221,35 @@ CosaDmlMapParseResponse
                          if ( uiSubOption == MAP_OPTION_S46_PORT_PARAMS &&
                               uiSubOptionLen == 4 )
                          {
-                              g_stMapData.PsidOffset  = (*(pCurOption += uiSubOptionLen))?
-                                                                 *pCurOption:6;
+                              pCurOption += sizeof(COSA_DML_MAP_OPTION);
+                              g_stMapData.PsidOffset  = *pCurOption;
                               g_stMapData.PsidLen     = *++pCurOption;
 
-                              if ( !g_stMapData.EaLen )
+                              // allowed PsidOffset values are 0 to 15
+                              if (g_stMapData.PsidOffset > 15)
                               {
-                                   g_stMapData.Ratio = 1 << g_stMapData.PsidLen;
+                                  MAP_LOG_ERROR("Parsing OPTION_S46_PORT_PARAM: Received invalid PsidOffset :%u", g_stMapData.PsidOffset);
+                                  return STATUS_FAILURE;
                               }
+
+                              // allowed PsidLen values are 0 to 16
+                              if (g_stMapData.PsidLen > 16)
+                              {
+                                  MAP_LOG_ERROR("Parsing OPTION_S46_PORT_PARAM: Received invalid PsidLen :%u", g_stMapData.PsidLen);
+                                  return STATUS_FAILURE;
+                              }
+
+                              /* RFC-compliant MAP port allocation requires PsidOffset + PsidLen <= 16. */
+                              if ((g_stMapData.PsidOffset + g_stMapData.PsidLen) > 16)
+                              {
+                                  MAP_LOG_ERROR(
+                                      "Parsing OPTION_S46_PORT_PARAM: Received invalid MAP parameters PsidOffset:%u PsidLen:%u",
+                                      g_stMapData.PsidOffset,
+                                      g_stMapData.PsidLen
+                                  );
+                                  return STATUS_FAILURE;
+                              }
+
                               /*
                                * RFC 7598: 4.5: 16 bits long. The first k bits on the left of
                                * this field contain the PSID binary value. The remaining (16 - k)
@@ -236,7 +260,33 @@ CosaDmlMapParseResponse
                               MAP_LOG_INFO("<<<TRACE>>> g_stMapData.Psid       : %u", g_stMapData.Psid);
                               MAP_LOG_INFO("<<<TRACE>>> g_stMapData.PsidLen    : %u", g_stMapData.PsidLen);
                               MAP_LOG_INFO("<<<TRACE>>> g_stMapData.PsidOffset : %u", g_stMapData.PsidOffset);
-                              MAP_LOG_INFO("<<<TRACE>>> g_stMapData.Ratio      : %u", g_stMapData.Ratio);
+
+                              /* ------------------------------------------------------------------ */
+                              /* Reserved Port Range Validation (0-1023) */
+                              /* ------------------------------------------------------------------ */
+                              {
+                                  UINT8 psidoffset  = g_stMapData.PsidOffset;
+                                  UINT8 psidLen = g_stMapData.PsidLen;
+                                  UINT16 psid   = g_stMapData.Psid;
+                                  UINT8 m = 16 - (psidLen + psidoffset);
+                                  UINT8 block_shift = 16 - psidoffset;
+                                  UINT32 min_i = (psidoffset == 0) ? 0 : 1;
+
+                                  /* psidLen / psidOffset combinations are validated earlier, so
+                                   * the bit allocation is guaranteed to fit within the 16-bit port space.
+                                   */
+
+                                  /* Lowest possible port for this CE */
+                                  UINT32 min_port = (min_i << block_shift) + (psid << m);
+                                  if (min_port < 1024)
+                                  {
+                                      MAP_LOG_WARNING(
+                                          "MAP-T WARNING: Privileged port usage detected! psid=%u psidLen=%u offset=%u min_port=%u",
+                                          psid, psidLen, psidoffset, min_port
+                                      );
+                                  }
+                              }
+                              /* ------------------------------------------------------------------ */
                               MAP_LOG_INFO("Parsing OPTION_S46_PORT_PARAM Successful.");
                          }
                          else
@@ -347,57 +397,6 @@ CosaDmlMapConvertStringToHexStream
   return STATUS_SUCCESS;
 }
 
-static RETURN_STATUS
-CosaDmlMapValidate
-(
-    PCHAR          pPdIPv6Prefix,
-    UINT16         ui16PdPrefixLen,
-    UINT16         ui16v6PrefixLen,
-    UINT16         ui16v4PrefixLen
-)
-{
-  UINT8 ui8v4BitIdxLen = 0, ui8PsidBitIdxLen = 0;
-  UINT8 ui8EaLen       = 0 ;
-  struct in6_addr ipv6Addr;
-
-  MAP_LOG_INFO("Entry");
-
-  // V4 suffix bits length
-  ui8v4BitIdxLen = BUFLEN_32 - ui16v4PrefixLen;
-
-  // EA bits length
-  ui8EaLen = ui16PdPrefixLen - ui16v6PrefixLen;
-
-  // PSID length
-  ui8PsidBitIdxLen = ui8EaLen - ui8v4BitIdxLen;
-
-  MAP_LOG_INFO("<<<Trace>>> ui8v4BitIdxLen(IPV4 Suffix Bits): %u", ui8v4BitIdxLen);
-  MAP_LOG_INFO("<<<Trace>>> ui8EaLen (EA bits)                    : %u", ui8EaLen);
-  MAP_LOG_INFO("<<<Trace>>> ui8PsidBitIdxLen(PSID length)         : %u", ui8PsidBitIdxLen);
-
-  if (ui8EaLen != g_stMapData.EaLen)
-  {
-       MAP_LOG_INFO("Calculated EA-bits and received MAP EA-bits does not match!");
-       return STATUS_FAILURE;
-  }
-
-  if ( ui16PdPrefixLen < ui16v6PrefixLen )
-  {
-       MAP_LOG_ERROR("Invalid MAP option, ui16PdPrefixLen(%d) < ui16v6PrefixLen(%d)",
-               ui16PdPrefixLen, ui16v6PrefixLen);
-       return STATUS_FAILURE;
-  }
-
-  if ( inet_pton(AF_INET6, pPdIPv6Prefix, &ipv6Addr) <= 0 )
-  {
-       MAP_LOG_ERROR("Invalid IPv6 address = %s", pPdIPv6Prefix);
-       return STATUS_FAILURE;
-  }
-
-   MAP_LOG_INFO("MAP validation successful.");
-  return STATUS_SUCCESS;
-}
-
 /**
  * @brief Parses the MAPE/MAPT options 94 & 95 response respectively.
  *
@@ -450,18 +449,6 @@ ANSC_STATUS DhcpMgr_MapParseOptResponse
        ret = STATUS_FAILURE;
   }
 
-    /* validate MAPT/MAPE response */
-  if ( !ret && CosaDmlMapValidate ( g_stMapData.PdIPv6Prefix
-                                                   , g_stMapData.PdIPv6PrefixLen
-                                                   , g_stMapData.RuleIPv6PrefixLen
-                                                   , g_stMapData.RuleIPv4PrefixLen
-                                                  ) != STATUS_SUCCESS )
-  {
-       MAP_LOG_ERROR("MAP Psid and IPv4 Suffix Validation Failed !!");
-       memset (&g_stMapData, 0, sizeof(g_stMapData));
-       ret = STATUS_FAILURE;
-  }
-
   if( ret == STATUS_SUCCESS )
   {
      //Fill Required MAP information
@@ -473,7 +460,6 @@ ANSC_STATUS DhcpMgr_MapParseOptResponse
      map->psidLen = g_stMapData.PsidLen;
      map->psid = g_stMapData.Psid;
      map->iapdPrefixLen = g_stMapData.PdIPv6PrefixLen;
-     map->ratio = g_stMapData.Ratio;
 
      snprintf (map->pdIPv6Prefix, BUFLEN_40, "%s", g_stMapData.PdIPv6Prefix);
      snprintf (map->ruleIPv4Prefix, BUFLEN_40, "%s", g_stMapData.RuleIPv4Prefix);
@@ -482,7 +468,7 @@ ANSC_STATUS DhcpMgr_MapParseOptResponse
      snprintf (map->brIPv6Prefix,   BUFLEN_40, "%s/%u", g_stMapData.BrIPv6Prefix
                                                                       , g_stMapData.BrIPv6PrefixLen);
      
-     MAP_LOG_INFO("MAP configuration complete.\n");
+     MAP_LOG_INFO("MAP Options parsing complete!\n");
   }
 
   return ((ret) ? ANSC_STATUS_FAILURE : ANSC_STATUS_SUCCESS);

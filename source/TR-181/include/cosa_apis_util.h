@@ -249,3 +249,31 @@ void* DhcpMgr_MainController( void *args );
 int DhcpMgr_OpenQueueEnsureThread(dhcp_info_t info);
 
 /**********************DHCPManager Queue requirements END ***************************/
+
+/**********************DHCP Enable Sysevent Helpers ***************************/
+
+/**
+ * @brief Set the sysevent value for DHCPCV4_ENABLE_ / DHCPCV6_ENABLE_ keys.
+ *
+ * Formats the value as "<ifname> 1" when enabled or "<ifname> 0" when disabled
+ * and sets it via commonSyseventSet.
+ *
+ * @param sysevent_key  The sysevent key (e.g. "DHCPCV4_ENABLE_1").
+ * @param ifname        Interface name (e.g. "erouter0"). Must not be NULL or empty.
+ * @param enabled       TRUE for enabled, FALSE for disabled.
+ * @return 0 on success, -1 on error.
+ */
+int Dhcp_set_Sysevent_InterfaceEnable(const char *sysevent_key, const char *ifname, BOOL enabled);
+
+/**
+ * @brief Get and parse the sysevent value for DHCPCV4_ENABLE_ / DHCPCV6_ENABLE_ keys.
+ *
+ * Reads the sysevent via commonSyseventGet and parses format "<ifname> 1" or "<ifname> 0".
+ *
+ * @param sysevent_key  The sysevent key (e.g. "DHCPCV4_ENABLE_1").
+ * @param ifname        Output buffer for the extracted interface name.
+ * @param ifnameLen     Size of ifname buffer.
+ * @param enabled       Output: TRUE if status is 1, FALSE if 0.
+ * @return 0 on success, -1 on error (sysevent not set, invalid format, or NULL inputs).
+ */
+int Dhcp_get_Sysevent_InterfaceEnable(const char *sysevent_key, char *ifname, size_t ifnameLen, BOOL *enabled);

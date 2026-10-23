@@ -633,11 +633,10 @@ static void *_task_manager_thrd(void * value)
         err = sysevent_getnotification(sysevent_fd, sysevent_token, event, &eventLen,
                                       eValue, &eValueLen, &getnotification_id);
 
-        IFL_LOG_INFO("Event getting triggered is [%s]", event);
-
         if (err)
         {
             IFL_LOG_ERROR("Sysevent get notification failed! err: %d", err);
+            sleep(2);
         }
         else
         {
@@ -645,6 +644,7 @@ static void *_task_manager_thrd(void * value)
             uint8 ctxID = 0;
             uint8 idx   = 0;
 
+            IFL_LOG_INFO("Event getting triggered is [%s]", event);
             /* _get_evt_id is not thread safe */
             evtID = _get_evt_id(event, 0);
           

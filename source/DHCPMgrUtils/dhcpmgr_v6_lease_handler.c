@@ -128,7 +128,7 @@ static bool compare_dhcpv6_plugin_msg(const DHCPv6_PLUGIN_MSG *currentLease, con
         memcmp(&currentLease->mape, &newLease->mape, sizeof(currentLease->mape)) != 0 ||
         strcmp(currentLease->domainName, newLease->domainName) != 0 ||
         strcmp(currentLease->ntpserver, newLease->ntpserver) != 0 ||
-        strcmp(currentLease->aftr, newLease->aftr) != 0) 
+        strcmp(currentLease->aftr, newLease->aftr) != 0)
     {
         return false; // Structures are not equal
     }
@@ -148,9 +148,9 @@ static bool compare_dhcpv6_plugin_msg(const DHCPv6_PLUGIN_MSG *currentLease, con
  */
 void DhcpMgr_ProcessV6Lease(PCOSA_DML_DHCPCV6_FULL pDhcp6c) 
 {
-    BOOL leaseChanged = false;
     while (pDhcp6c->NewLeases != NULL) 
     {
+        BOOL leaseChanged = false;
         // Compare  parameters of currentLease and NewLeases
         DHCPv6_PLUGIN_MSG *current = pDhcp6c->currentLease;
         DHCPv6_PLUGIN_MSG *newLease = pDhcp6c->NewLeases;
@@ -162,6 +162,28 @@ void DhcpMgr_ProcessV6Lease(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
         }
         else if(current->isExpired == FALSE && newLease->isExpired == TRUE)
         {
+            /*
+             * Stale DEL guard: If the DEL is for a different prefix than the current
+             * active one (e.g., DEL for old prefix 300 but current is new prefix 400),
+             * skip it. Publishing this stale DEL would cause WanManager to tear down
+             * the active interface unnecessarily.
+             */
+            if (current->ia_pd.assigned == TRUE && newLease->ia_pd.assigned == TRUE &&
+                (strncmp(current->ia_pd.Prefix, newLease->ia_pd.Prefix,  
+                         sizeof(current->ia_pd.Prefix)) != 0 ||  
+                 current->ia_pd.PrefixLength != newLease->ia_pd.PrefixLength))
+            {
+                DHCPMGR_LOG_WARNING("%s %d: Skipping stale DEL for prefix %s/%d on %s "
+                                    "(current active prefix is %s)\n",
+                                    __FUNCTION__, __LINE__,
+                                    newLease->ia_pd.Prefix,
+                                    newLease->ia_pd.PrefixLength,
+                                    pDhcp6c->Cfg.Interface,
+                                    current->ia_pd.Prefix);
+                pDhcp6c->NewLeases = newLease->next;
+                free(newLease);
+                continue;
+            }
             DhcpMgr_PublishDhcpV6Event(pDhcp6c, DHCP_LEASE_DEL);
             DHCPMGR_LOG_INFO("%s %d: lease expired  for %s \n",__FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
         }
@@ -198,7 +220,6 @@ void DhcpMgr_ProcessV6Lease(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
                 DHCPMGR_LOG_INFO("%s %d: lease renewed for %s \n",__FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
             }
         }
-
 
         DHCPMGR_LOG_INFO("%s %d: New lease  : %s \n",__FUNCTION__, __LINE__, newLease->isExpired?"Expired" : "Valid");
 
@@ -370,7 +391,7 @@ static void configureNetworkInterface(PCOSA_DML_DHCPCV6_FULL pDhcp6c)
 
     // Use system calls or platform-specific APIs to configure the network interface
     char command[256];
-    snprintf(command, sizeof(command), "ip -6 addr add %s dev %s preferred_lft %s valid_lft %s", ipv6Address, interface, preferredLftStr, validLftStr);
+    snprintf(command, sizeof(command), "ip -6 addr replace '%s' dev '%s' preferred_lft %s valid_lft %s", ipv6Address, interface, preferredLftStr, validLftStr);
     if(exec_shell_cmd(command) != 0)
     {
         DHCPMGR_LOG_ERROR("%s %d: Failed to configure IPv6 address on interface %s. Command: %s\n", __FUNCTION__, __LINE__, interface, command);

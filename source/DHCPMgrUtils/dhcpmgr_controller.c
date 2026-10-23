@@ -49,9 +49,46 @@
 #include "dhcpmgr_recovery_handler.h"
 #include "dhcpmgr_custom_options.h"
 #include "cosa_apis_util.h"
+#include <telemetry_busmessage_sender.h>
+#include <linux/if_addr.h>     /* IFA_F_TENTATIVE */
+#include <string.h>            /* strerror */
 
 
 /* ---- Global Constants -------------------------- */
+
+/**
+ * @brief Updates the DHCP client enable/disable state via sysevent.
+ *
+ * Sets a sysevent key (DHCPCV4_ENABLE or DHCPCV6_ENABLE) for the given
+ * interface instance to reflect the current enabled state.
+ *
+ * @param instance  The DHCP client instance number.
+ * @param if_name   The network interface name.
+ * @param enabled       TRUE to enable, FALSE to disable.
+ * @param dhcpVersion   DHCP_v4 or DHCP_v6.
+ */
+static void DhcpMgr_UpdateEnableSysevent(ULONG instance, const char *if_name, BOOL enabled, int dhcpVersion)
+{
+    DHCPMGR_LOG_DEBUG("%s %d: Updating sysevent for instance %lu, interface %s, enabled %d, DHCP version %d\n", 
+        __FUNCTION__, __LINE__, instance, if_name ? if_name : "NULL", enabled, dhcpVersion);
+    char sysevent_key[64] = {0};
+
+    snprintf(sysevent_key,
+             sizeof(sysevent_key),
+             (dhcpVersion == DHCP_v6) ? "DHCPCV6_ENABLE_%lu" : "DHCPCV4_ENABLE_%lu",
+             instance);
+
+    if (if_name == NULL || if_name[0] == '\0')
+    {
+        DHCPMGR_LOG_ERROR("%s %d: Cannot set sysevent %s with empty interface name\n", __FUNCTION__, __LINE__, sysevent_key);
+        return;
+    }
+
+    if (Dhcp_set_Sysevent_InterfaceEnable(sysevent_key, if_name, enabled) != 0)
+    {
+        DHCPMGR_LOG_ERROR("%s %d: Failed to set sysevent %s\n", __FUNCTION__, __LINE__, sysevent_key);
+    }
+}
 
 /**
  * @brief Starts the main controller thread.
@@ -90,6 +127,7 @@ int DhcpMgr_StartMainController()
     if(retStatus < 0)
     {
         DHCPMGR_LOG_ERROR("%s %d - Lease Monitor Thread failed to start!\n", __FUNCTION__, __LINE__ );
+        t2_event_d("DHCPMGR_ERROR_LeaseMonitorStartFail", 1);
     }
 
 
@@ -253,7 +291,17 @@ static int DhcpMgr_build_dhcpv6_opt_list (PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT hIns
             pSentOption         = (PCOSA_DML_DHCPCV6_SENT)pCxtLink->hContext;
             if (pSentOption->bEnabled)
             {
-                if(pSentOption->Tag == DHCPV6_OPT_15 && strlen((char *)pSentOption->Value) <= 0)
+                if(pSentOption->Tag == DHCPV6_OPT_25 && strlen((char *)pSentOption->Value) <= 0)
+                {
+                    // Identity Association (IA) for Prefix Delegation option OPTION_IA_PD(25)
+                    DHCPMGR_LOG_INFO("%s %d: Adding DHCPv6 option - Number: %d\n", __FUNCTION__, __LINE__, DHCPV6_OPT_25);
+                    if (Get_DhcpV6_CustomOption_25(send_opt_list) != RETURN_OK)
+                    {
+                        DHCPMGR_LOG_ERROR("%s %d: Failed to add DHCPv6 option %d.\n", __FUNCTION__, __LINE__, DHCPV6_OPT_25);
+                        return RETURN_ERR;
+                    }
+                }
+                else if(pSentOption->Tag == DHCPV6_OPT_15 && strlen((char *)pSentOption->Value) <= 0)
                 {
                     DHCPMGR_LOG_INFO("%s %d: DHCPv6 option 15 (User Class Option) entry found without value. \n", __FUNCTION__, __LINE__);
                     char optionValue[BUFLEN_256] = {0};
@@ -377,38 +425,81 @@ static bool DhcpMgr_checkInterfaceStatus(const char * ifName)
 }
 
 /**
- * @brief Checks for the presence of a link-local address and its DAD status on a network interface.
+ * @brief Checks if the link-local address on a network interface has completed DAD.
  *
- * This function checks if the specified network interface has a link-local address (LLA) by
- * executing the command `ip address show dev %s tentative`. It also verifies the link-local
- * Duplicate Address Detection (DAD) status. If no LLA is found, it restarts the IPv6 stack
- * on the interface.
+ * Reads /proc/net/if_inet6 to find a link-local address (scope 0x20) on the
+ * given interface. Waits up to INTF_V6LL_TIMEOUT_IN_MSEC for DAD to finish.
+ * If no link-local address appears within the timeout, restarts the IPv6 stack.
  *
- * @param interfaceName The name of the network interface to check.
- * @return true if the link-local address is found and DAD status is verified, false otherwise.
+ * @param interfaceName The network interface to check.
+ * @return true when at least one non-tentative link-local address is found,
+ *         or when /proc/net/if_inet6 cannot be opened (DAD check skipped).
+ *         Returns false if no link-local address appears within the timeout.
  */
 static bool DhcpMgr_checkLinkLocalAddress(const char * interfaceName)
-{ 
-    // check if interface is ipv6 ready with a link-local address
+{
     unsigned int waitTime = INTF_V6LL_TIMEOUT_IN_MSEC;
-    char cmd[BUFLEN_128] = {0};
-    snprintf(cmd, sizeof(cmd), "ip address show dev %s tentative", interfaceName);
+
     while (waitTime > 0)
     {
-        FILE *fp_dad   = NULL;
-        char buffer[BUFLEN_256] = {0};
+        bool tentative = false;
+        bool iface_found = false;
 
-        fp_dad = popen(cmd, "r");
-        if(fp_dad != NULL)
+        FILE *fp_inet6 = fopen("/proc/net/if_inet6", "r");
+        if (fp_inet6 != NULL)
         {
-            if ((fgets(buffer, BUFLEN_256, fp_dad) == NULL) || (strlen(buffer) == 0))
+            char addr[33];
+            unsigned int if_idx, pfx_len, scope, flags;
+            char ifname[IF_NAMESIZE + 1];
+
+            while (fscanf(fp_inet6, "%32s %x %x %x %x %16s",
+                          addr, &if_idx, &pfx_len, &scope, &flags, ifname) == 6)
             {
-                pclose(fp_dad);
-                break;
+                (void)addr; (void)if_idx; (void)pfx_len;
+
+                if (strcmp(ifname, interfaceName) != 0)
+                    continue;
+
+                /* Only check link-local addresses (scope 0x20 = IPV6_ADDR_LINKLOCAL) */
+                if (scope != 0x20U)
+                    continue;
+
+                iface_found = true;
+                if (flags & IFA_F_TENTATIVE)
+                {
+                    tentative = true;
+                    /* keep scanning — a later entry may already be non-tentative */
+                }
+                else
+                {
+                    tentative = false;
+                    break; /* at least one link-local address is ready */
+                }
             }
-            DHCPMGR_LOG_WARNING("%s %d: interface still tentative: %s\n", __FUNCTION__, __LINE__, buffer);
-            pclose(fp_dad);
+            fclose(fp_inet6);
         }
+        else
+        {
+            DHCPMGR_LOG_ERROR("%s %d: failed to open /proc/net/if_inet6 (%s), skipping DAD check\n",
+                              __FUNCTION__, __LINE__, strerror(errno));
+            break;
+        }
+
+        if (!iface_found)
+        {
+            DHCPMGR_LOG_WARNING("%s %d: no link-local address for %s in /proc/net/if_inet6 yet\n",
+                                __FUNCTION__, __LINE__, interfaceName);
+        }
+        else if (!tentative)
+        {
+            break;
+        }
+        else
+        {
+            DHCPMGR_LOG_WARNING("%s %d: interface %s link-local still tentative (DAD in progress)\n",
+                                __FUNCTION__, __LINE__, interfaceName);
+        }
+
         usleep(INTF_V6LL_INTERVAL_IN_MSEC * USECS_IN_MSEC);
         waitTime -= INTF_V6LL_INTERVAL_IN_MSEC;
     }
@@ -461,6 +552,7 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
         }
 
         pthread_mutex_lock(&pDhcpc->mutex); //MUTEX lock
+        INT release_ip = 0;
         if(strncmp(pDhcpc->Cfg.Interface, if_name, sizeof(pDhcpc->Cfg.Interface)) == 0)
         {
             if(dml_set_msg.ParamName == NULL)
@@ -470,18 +562,33 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
             else if (strcmp(dml_set_msg.ParamName, "Enable") == 0 )
             {
                 pDhcpc->Cfg.bEnabled = dml_set_msg.value.bValue;
+                if (dml_set_msg.value.bValue)
+                {
+                    t2_event_d("DHCPMGR_INFO_Dhcpv4ClientEnabled", 1);
+                    DHCPMGR_LOG_INFO("%s %d: DHCPv4 client enabled on interface %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface);
+                }
+                else
+                {
+                    t2_event_d("DHCPMGR_INFO_Dhcpv4ClientDisabled", 1);
+                    DHCPMGR_LOG_INFO("%s %d: DHCPv4 client disabled on interface %s \n", __FUNCTION__, __LINE__, pDhcpc->Cfg.Interface);
+                }
             }
             else if (strcmp(dml_set_msg.ParamName, "Renew") == 0 ) 
             {
                 pDhcpc->Cfg.Renew = dml_set_msg.value.bValue;
             }
-            else if (strcmp(dml_set_msg.ParamName, "Restart") == 0 )
+            else if (strcmp(dml_set_msg.ParamName, "X_RDK_Restart") == 0 )
             {
                 pDhcpc->Cfg.Restart = dml_set_msg.value.bValue;
             }
             else if (strcmp(dml_set_msg.ParamName, "ProcessLease") == 0 )
             {
                 DhcpMgr_ProcessV4Lease(pDhcpc);
+            }
+            else if (strcmp(dml_set_msg.ParamName, "X_RDK_Release") == 0 )
+            {
+                DHCPMGR_LOG_INFO("%s %d: Releasing the IP address and stopping the client\n",__FUNCTION__,__LINE__);
+                release_ip = 1;
             }
             else if (strcmp(dml_set_msg.ParamName, "Selfheal_ClientRestart") == 0 )
             {
@@ -498,7 +605,7 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
             continue;
         }
 
-        if(pDhcpc->Cfg.bEnabled == TRUE )
+        if(pDhcpc->Cfg.bEnabled == TRUE && release_ip == 0)
         {
             if(pDhcpc->Info.Status == COSA_DML_DHCP_STATUS_Disabled)
             {
@@ -507,6 +614,8 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
                 if(DhcpMgr_checkInterfaceStatus(pDhcpc->Cfg.Interface)== FALSE)
                 {
                     pDhcpc->Cfg.bEnabled = FALSE;
+                    //update the sysevent with interface enabled status as false, so that dhcp client won't be started on DHCPMANAGER crash recovery.
+                    DhcpMgr_UpdateEnableSysevent(pDhcpc->Cfg.InstanceNumber, pDhcpc->Cfg.Interface, FALSE, DHCP_v4);
                     DhcpMgr_PublishDhcpV4Event(pDhcpc, DHCP_CLIENT_FAILED);
                 }
                 else
@@ -544,7 +653,7 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
             }
             else if (pDhcpc->Cfg.Restart == TRUE)
             {
-                //Only stoping the client here, restart will be done in the next iteration
+                //Restart the DHCP client will release the ip  and start the client again to get a new lease.
                 DHCPMGR_LOG_INFO("%s %d: Restarting dhcpv4 client : %s PID : %d\n",__FUNCTION__, __LINE__, pDhcpc->Cfg.Interface, pDhcpc->Info.ClientProcessId);
                 send_dhcpv4_release(pDhcpc->Info.ClientProcessId);
                 pDhcpc->Info.Status = COSA_DML_DHCP_STATUS_Disabled;
@@ -558,8 +667,18 @@ static void Process_DHCPv4_Handler(char* if_name, dhcp_info_t dml_set_msg)
             if(pDhcpc->Info.Status == COSA_DML_DHCP_STATUS_Enabled)
             {
                 DHCPMGR_LOG_INFO("%s %d: Stopping the dhcpv4 client : %s PID : %d \n",__FUNCTION__, __LINE__, pDhcpc->Cfg.Interface, pDhcpc->Info.ClientProcessId);
-                //Always send release and stop the client
-                send_dhcpv4_release(pDhcpc->Info.ClientProcessId); 
+                if(release_ip)
+                {
+                    send_dhcpv4_release(pDhcpc->Info.ClientProcessId);
+                    /* X_RDK_Release: disable the client */
+                    pDhcpc->Cfg.bEnabled = FALSE;
+                    //update the sysevent with interface enabled status as false, so that dhcp client won't be started on DHCPMANAGER crash recovery.
+                    DhcpMgr_UpdateEnableSysevent(pDhcpc->Cfg.InstanceNumber, pDhcpc->Cfg.Interface, FALSE, DHCP_v4);
+                }
+                else
+                {
+                    stop_dhcpv4_client(pDhcpc->Info.ClientProcessId);
+                }
                 pDhcpc->Info.Status = COSA_DML_DHCP_STATUS_Disabled;
                 pDhcpc->Cfg.Renew = FALSE;
                 DhcpMgr_PublishDhcpV4Event(pDhcpc, DHCP_LEASE_DEL); //Send lease expired event
@@ -605,6 +724,7 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
         }
         
         pthread_mutex_lock(&pDhcp6c->mutex); //MUTEX lock
+        INT release_ip = 0;
         if(strncmp(pDhcp6c->Cfg.Interface, if_name, sizeof(pDhcp6c->Cfg.Interface)) == 0)
         {
             if (dml_set_msg.ParamName == NULL)
@@ -614,18 +734,33 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
             else if (strcmp(dml_set_msg.ParamName, "Enable") == 0 )
             {
                 pDhcp6c->Cfg.bEnabled = dml_set_msg.value.bValue;
+                if (dml_set_msg.value.bValue)
+                {
+                    t2_event_d("DHCPMGR_INFO_Dhcpv6ClientEnabled", 1);
+                    DHCPMGR_LOG_INFO("%s %d: DHCPv6 client enabled on interface %s \n", __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
+                }
+                else
+                {
+                    t2_event_d("DHCPMGR_INFO_Dhcpv6ClientDisabled", 1);
+                    DHCPMGR_LOG_INFO("%s %d: DHCPv6 client disabled on interface %s \n", __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
+                }
             }
             else if (strcmp(dml_set_msg.ParamName, "Renew") == 0 ) 
             {
                 pDhcp6c->Cfg.Renew = dml_set_msg.value.bValue;
             }
-            else if (strcmp(dml_set_msg.ParamName, "Restart") == 0 )
+            else if (strcmp(dml_set_msg.ParamName, "X_RDK_Restart") == 0 )
             {
                 pDhcp6c->Cfg.Restart = dml_set_msg.value.bValue;
             }
             else if (strcmp(dml_set_msg.ParamName, "ProcessLease") == 0 )
             {
                 DhcpMgr_ProcessV6Lease(pDhcp6c);
+            }
+            else if (strcmp(dml_set_msg.ParamName, "X_RDK_Release") == 0 )
+            {
+                DHCPMGR_LOG_INFO("%s %d: Releasing the IP address and stopping the client\n",__FUNCTION__,__LINE__);
+                release_ip = 1;
             }
             else if (strcmp(dml_set_msg.ParamName, "Selfheal_ClientRestart") == 0 )
             {
@@ -641,7 +776,7 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
             pthread_mutex_unlock(&pDhcp6c->mutex); //MUTEX unlock
             continue;
         }
-        if(pDhcp6c->Cfg.bEnabled == TRUE )
+        if(pDhcp6c->Cfg.bEnabled == TRUE && release_ip == 0)
         {
             if(pDhcp6c->Info.Status == COSA_DML_DHCP_STATUS_Disabled)
             {
@@ -650,11 +785,43 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
                 if(DhcpMgr_checkInterfaceStatus(pDhcp6c->Cfg.Interface)== FALSE)
                 {
                     pDhcp6c->Cfg.bEnabled = FALSE;
+                    //update the sysevent with interface enabled status as false, so that dhcp client won't be started on DHCPMANAGER crash recovery.
+                    DhcpMgr_UpdateEnableSysevent(pDhcp6c->Cfg.InstanceNumber, pDhcp6c->Cfg.Interface, FALSE, DHCP_v6);
                     DhcpMgr_PublishDhcpV6Event(pDhcp6c, DHCP_CLIENT_FAILED);
                 }
                 else if(DhcpMgr_checkLinkLocalAddress(pDhcp6c->Cfg.Interface)== FALSE)
                 {
-                    //Link local failed. Retry
+                    /*
+                     * DhcpMgr_checkLinkLocalAddress() timed out — either the link-local
+                     * address is still TENTATIVE (DAD in progress) or no link-local
+                     * address has appeared on the interface yet.
+                     * checkLinkLocalAddress() has already force-toggled disable_ipv6
+                     * to regenerate the link-local address, but that completes
+                     * asynchronously. Re-enqueue a restart so the client is started
+                     * once the link-local address is ready, instead of leaving it
+                     * permanently stopped (Info.Status stays Disabled and dibbler is
+                     * never launched).
+                     * checkLinkLocalAddress() blocks up to INTF_V6LL_TIMEOUT_IN_MSEC
+                     * per call, so this retry is naturally rate-limited.
+                     * The Linux kernel guarantees link-local address resolution within
+                     * retrans_time_ms x dad_transmits (~1 s on RDKB devices), so the
+                     * retry loop always terminates (RDKB-66284).
+                     */
+                    DHCPMGR_LOG_WARNING("%s %d: link-local not ready for %s, re-enqueuing dhcpv6 client start\n",
+                                        __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
+                    dhcp_info_t retry_info;
+                    memset(&retry_info, 0, sizeof(retry_info));
+                    strncpy(retry_info.if_name, pDhcp6c->Cfg.Interface, MAX_STR_LEN - 1);
+                    retry_info.if_name[MAX_STR_LEN - 1] = '\0';
+                    retry_info.dhcpType = DML_DHCPV6;
+                    strncpy(retry_info.ParamName, "Selfheal_ClientRestart", sizeof(retry_info.ParamName) - 1);
+                    retry_info.ParamName[sizeof(retry_info.ParamName) - 1] = '\0';
+                    retry_info.value.bValue = FALSE;
+                    if (DhcpMgr_OpenQueueEnsureThread(retry_info) != 0)
+                    {
+                        DHCPMGR_LOG_ERROR("%s %d: Failed to re-enqueue dhcpv6 client start for %s\n",
+                                          __FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface);
+                    }
                 }
                 else
                 {
@@ -691,7 +858,7 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
             }
             else if( pDhcp6c->Cfg.Restart == TRUE)
             {
-                //Only stoping the client here, restart will be done in the next iteration
+                //Restart the DHCP client will release the ip  and start the client again to get a new lease.
                 DHCPMGR_LOG_INFO("%s %d: Restarting dhcpv6 client : %s PID : %d\n",__FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface, pDhcp6c->Info.ClientProcessId);
                 send_dhcpv6_release(pDhcp6c->Info.ClientProcessId);
                 pDhcp6c->Info.Status = COSA_DML_DHCP_STATUS_Disabled;
@@ -706,8 +873,19 @@ static void Process_DHCPv6_Handler(char* if_name, dhcp_info_t dml_set_msg)
             if(pDhcp6c->Info.Status == COSA_DML_DHCP_STATUS_Enabled)
             {
                 DHCPMGR_LOG_INFO("%s %d: Stopping the dhcpv6 client : %s PID : %d \n",__FUNCTION__, __LINE__, pDhcp6c->Cfg.Interface, pDhcp6c->Info.ClientProcessId);
-                //Always send release and stop the client. 
-                send_dhcpv6_release(pDhcp6c->Info.ClientProcessId);
+                //Don't release IP unless specifically mentioned and stop the client.
+                if(release_ip)
+                {
+                    send_dhcpv6_release(pDhcp6c->Info.ClientProcessId);
+                    /* X_RDK_Release: disable the client */
+                    pDhcp6c->Cfg.bEnabled = FALSE;
+                    //update the sysevent with interface enabled status as false, so that dhcp client won't be started on DHCPMANAGER crash recovery.
+                    DhcpMgr_UpdateEnableSysevent(pDhcp6c->Cfg.InstanceNumber, pDhcp6c->Cfg.Interface, FALSE, DHCP_v6);
+                }
+                else
+                {
+                    stop_dhcpv6_client(pDhcp6c->Info.ClientProcessId);
+                }
                 pDhcp6c->Info.Status = COSA_DML_DHCP_STATUS_Disabled;
                 pDhcp6c->Cfg.Renew = FALSE;
                 DhcpMgr_PublishDhcpV6Event(pDhcp6c, DHCP_LEASE_DEL); //Send lease expired event
@@ -794,21 +972,19 @@ void* DhcpMgr_MainController( void *args )
         {
             if (errno == EAGAIN)
             {
-                /* No message yet, wait 250ms */
-                usleep(sleep_us);
-                DHCPMGR_LOG_DEBUG("%s %d: mq_receive timeout, no message received yet on %s with retry count %d\n",__FUNCTION__, __LINE__, mq_name, retry_count);
-                retry_count++;
-
-                if (retry_count >= max_retries)
+                if (retry_count > max_retries)
                 {
                     DHCPMGR_LOG_DEBUG("%s %d: mq_receive timeout after 5s on %s\n",__FUNCTION__, __LINE__, mq_name);
                     if(DhcpMgr_LockInterfaceQueueMutexByName(inf_name) != 0) // lock the mutex
                     {
                         DHCPMGR_LOG_ERROR("%s %d Failed to lock interface queue mutex for %s\n", __FUNCTION__, __LINE__, inf_name);
                     }
-                    break; // exit thread after timeout
+                    break; // queue truly empty under lock, safe to exit thread
                 }
-
+                 /* No message yet, wait 250ms */
+                usleep(sleep_us);
+                DHCPMGR_LOG_DEBUG("%s %d: mq_receive timeout, no message received yet on %s with retry count %d\n",__FUNCTION__, __LINE__, mq_name, retry_count);
+                retry_count++;
                 continue; // retry loop
             }
             else
