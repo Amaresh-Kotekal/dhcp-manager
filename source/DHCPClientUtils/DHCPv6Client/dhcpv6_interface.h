@@ -77,10 +77,11 @@ typedef struct _DHCPv6_PLUGIN_MSG
     //Vendor Specific Options
     struct {
         bool Assigned;  /**< Have we received vendor-specific options? */
-        char Data[BUFLEN_256]; /* Buffer to store vendor-specific options */
+        char Data[BUFLEN_1024]; /* Buffer to store vendor-specific options */
         uint32_t Length; /* Length of vendor-specific options */
     }vendor;
 
+    char cFqdn[BUFLEN_256];       /**< Client FQDN (option 39) as exported by dibbler */
     char domainName[BUFLEN_64];  /**< New domain Name,   */
     char ntpserver[BUFLEN_128];  /**< New ntp server(s), dhcp server may provide this */
     char aftr[AFTR_NAME_LENGTH]; /**< dhcp server may provide this */

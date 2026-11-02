@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "dhcpmgr_rbus_apis.h"
 #include "cosa_dhcpv4_apis.h"
 #include "cosa_dhcpv6_apis.h"
@@ -301,6 +302,318 @@ static void DhcpMgr_createDhcpv6LeaseInfoMsg(DHCPv6_PLUGIN_MSG *src, DHCP_MGR_IP
     }
 }
 
+
+/* Convert "ab:cd:ef" to bytes. Returns the byte count, or -1 if s is not colon-separated hex or does not fit. */
+static int DhcpMgr_HexColonToBytes(const char *pString, unsigned char *pOut, size_t outSize)
+{
+    size_t iSize = 0;
+
+    while (*pString != '\0')
+    {
+        if (iSize >= outSize || !isxdigit((unsigned char)pString[0]) || !isxdigit((unsigned char)pString[1]))
+        {
+            return -1;
+        }
+        char cHex[3] = { pString[0], pString[1], '\0' };
+        pOut[iSize++] = (unsigned char)strtoul(cHex, NULL, 16);
+        pString += 2;
+        if (*pString == ':')
+        {
+            pString++;
+        }
+        else if (*pString != '\0')
+        {
+            return -1;
+        }
+    }
+    return (int)iSize;
+}
+
+/* For FQDN, the rest is length-prefixed labels ending in a zero byte:
+ * 00 | 12 "dpe1-grp2-pub-mtnk" | 04 "rpub" | 03 "net" | 06 "rogers" | 03 "com" | 00
+ * ^type   ^ each label = 1 length byte + that many characters         ^ end
+ * Decode length-prefixed DNS labels into a dotted name without the trailing dot. Returns 0 on success. */
+static int DhcpMgr_DecodeDnsName(const unsigned char *pBuf, size_t iLen, char *pOut, size_t outSize)
+{
+    size_t iPos = 0, iWritten = 0;
+
+    while (iPos < iLen && pBuf[iPos] != 0)
+    {
+        size_t iLabelLen = pBuf[iPos++];
+        //iLabelLen > 63: a DNS label may be at most 63 bytes.
+        if (iLabelLen > 63 || iPos + iLabelLen > iLen || iWritten + iLabelLen + 2 > outSize)
+        {
+            pOut[0] = '\0';
+            return -1;
+        }
+        if (iWritten > 0)
+        {
+            pOut[iWritten++] = '.';
+        }
+        memcpy(&pOut[iWritten], &pBuf[iPos], iLabelLen);
+        iWritten += iLabelLen;
+        iPos += iLabelLen;
+    }
+    pOut[iWritten] = '\0';
+    return (iWritten > 0) ? 0 : -1;
+}
+
+/* Write the first address of a list of 16-byte IPv6 addresses as text. */
+static void DhcpMgr_FirstIpv6ToText(const unsigned char *pBuf, size_t iLen, char *pOut, size_t outSize)
+{
+    if (iLen >= 16 && NULL == inet_ntop(AF_INET6, pBuf, pOut, outSize))
+    {
+        pOut[0] = '\0';
+    }
+}
+
+/* 4,Sub-option 2171 (server reply): nested 2-byte code, 2-byte length
+ *
+ * 0                   1                   2                   3
+ * 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |   nested-code (1,2,3,6)       |        nested-len             |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |  nested value ...                                             |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ * |NestedCode	Meaning	                            Length	   Value in the capture (Example)
+ * |1	        Primary DHCPv6 server selector ID	4	       ff ff ff ff (binary)
+ * |2	        Secondary server selector ID        4	       ff ff ff ff (binary)
+ * |3	        Provisioning server	                41	       1 type byte, then the address (see below)
+ * |6	        Kerberos realm	                    9	       label-encoded BASIC.1.
+ *
+ * Nested 3 value: the first byte is the type: 0x00 FQDN, 0x01 IPv4, 0x02 IPv6.
+ * Only the FQDN type was seen in the capture. The IPv4 and IPv6 types come from the voice HAL header comment.
+ */
+
+/* Option 17 sub-option 2171 holds nested 2-byte code/length TLVs; nested 3 is the provisioning server (type byte 0=FQDN, 1=IPv4, 2=IPv6). */
+static void DhcpMgr_ParseProvServer(const unsigned char *pBuf, size_t iLen, char *pOut, size_t outSize)
+{
+    size_t iPos = 0;
+
+    while (iPos + 4 <= iLen)
+    {
+        unsigned int uiCode = ((unsigned int)pBuf[iPos] << 8) | pBuf[iPos + 1];
+        size_t iSubLen = ((size_t)pBuf[iPos + 2] << 8) | pBuf[iPos + 3];
+        iPos += 4;
+        if (iPos + iSubLen > iLen)
+        {
+            return;
+        }
+        /* Only process nested code 3 (Provisioning server) */
+        if (uiCode == 3 && iSubLen > 1)
+        {
+            const unsigned char *pVal = &pBuf[iPos + 1];
+            switch (pBuf[iPos])
+            {
+                case 0: // FQDN
+                    DhcpMgr_DecodeDnsName(pVal, iSubLen - 1, pOut, outSize);
+                    break;
+                case 1: // IPv4
+                    if (iSubLen == 5 && NULL == inet_ntop(AF_INET, pVal, pOut, outSize)) pOut[0] = '\0';
+                    break;
+                case 2: // IPv6
+                    if (iSubLen == 17 && NULL == inet_ntop(AF_INET6, pVal, pOut, outSize)) pOut[0] = '\0';
+                    break;
+                default:
+                    break;
+            }
+            return;
+        }
+        iPos += iSubLen;
+    }
+}
+
+
+ /**
+ * https://www.rfc-editor.org/info/rfc8415/ section 21.17
+ * 1, Option 17 (Vendor-specific Information)
+ *
+ * 0                   1                   2                   3
+ * 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ *+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *|       option-code = 17        |          option-len           |
+ *+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *|                       enterprise-number                       |
+ *+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *|                 sub-options (repeated, see 2)                 |
+ *.                                                               .
+ *+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ * |Field	          Size	    Type	    Value in the capture
+ * |option-code	      2 bytes	unsigned	0x0011 (17)
+ * |option-len	      2 bytes	unsigned	SOLICIT 0x00E5 (229), REPLY 0x00C1 (193). It counts everything after this field, including the 4-byte enterprise number.
+ * |enterprise-number  4 bytes	unsigned	0x0000118B (4491, CableLabs)
+ * |sub-options	      variable	TLV list	see below
+ *
+ * 2, Each sub-option (2-byte code, 2-byte length)
+ *
+ * 0                   1                   2                   3
+ * 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |        sub-option-code        |        sub-option-len         |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |                   value (sub-option-len bytes)                |
+ * .                                                               .
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * sub-option-len counts the value only, not the 4-byte header.
+ *
+ * Sent by the MTA (SOLICIT)
+ * |Code	 Name	                   Length	  Type	                Example|
+ * |1	     Option request	            12	      list of 2-byte codes	0020 0021 0022 0025 0026 087B|
+ * |2	     Device type	            4	      ASCII	                EDVA|
+ * |4	     Serial number	            variable  ASCII	                3363043022102272|
+ * |5/6/7	 Hardware/software/         variable  ASCII	                2.2, Prod_23.2_231009, S1TC-3.63.20.104
+ * |         boot ROM version
+ * |8	     OUI	                    6	      ASCII hex text        48bdce|
+ * |9/10	 Model / vendor	            variable  ASCII	                CGM4331COM, Technicolor|
+ * |35	     PacketCable capabilities 	73	      TLV block (see 3)
+ * |36	     MTA MAC	                6	      binary	            48:bd:ce:5f:48:01|
+ * |2172	 Correlation ID	            4	      binary	            58 c0 06 33|
+ *
+ * Returned by the server (REPLY)
+ * |Code	Name	                        Length	        Type
+ * |32	    TFTP server addresses	        16 per address	IPv6 addresses, back to back
+ * |33	    Config file name	            67	            ASCII
+ * |34	    Syslog servers	                16 per address	IPv6 addresses, back to back
+ * |2171	CableLabs client configuration	74	            nested sub-elements (see 4)
+ *
+ * 3,Sub-option 35 body (capabilities): 1-byte type, 1-byte length
+ *
+ *  0                   1                   2                   3
+ * 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *     type      |    length     |    value ...  |  type | len | ...
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *
+ * For example 01 01 02 means PacketCable version 2, and 0B 0B 06 09 0E ... is the supported-codecs list.
+ * Here the type and length are one byte each, unlike the outer sub-options.
+ *
+ *
+ * 5, Option 39 (Client FQDN, RFC 4704)
+ * | 0                   1                   2                   3
+ * |0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |       option-code = 39        |          option-len           |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * | flags (MBZ|N|O|S) | domain name (length-prefixed labels) ...   |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * The flags byte is 0x01 in your capture (S bit set). The client sends it with an empty name.
+ * The server REPLY returned a 45-byte option: the flags byte plus EMTA48bdce5f4801.gpon-emta6.net.rogers.com. in label form.
+ *
+ * 6, How DHCP Manager receives it
+ * Dibbler hands the plugin the sub-options as text, one code=value per sub-option, with the value as colon-separated hex bytes
+ * vendor=4491 33=64:38:2d:... 32=20:01:04:e8:... 34=20:01:... 37=...
+ * The first byte pair of each value is the first byte after the 2-byte length field.
+ * The parser we have added here reads that text, converts it to bytes, and then applies the layouts above.
+ */
+
+
+
+ /**
+ * @brief Extract the voice data from the server option 17 string and option 39 string of a lease.
+ *
+ * Option 17 is "vendor=4491 32=aa:bb:.. 33=.. 34=.. 2171=.."; option 39 is flags byte plus DNS labels.
+ *
+ * @param src  Source DHCPv6 lease.
+ * @param dest Destination voice message.
+ * @return true if at least one voice value was found.
+ */
+static bool DhcpMgr_createVoiceInfoMsg(const DHCPv6_PLUGIN_MSG *pSrcData, DHCP_MGR_VOICE_V6_MSG *pDestData)
+{
+    memset(pDestData, 0, sizeof(*pDestData));
+
+    char cVendorData[sizeof(pSrcData->vendor.Data)];
+    snprintf(cVendorData, sizeof(cVendorData), "%s", pSrcData->vendor.Data);
+
+    char *saveptr = NULL;
+    for (char *pToken = strtok_r(cVendorData, " ", &saveptr); pToken != NULL; pToken = strtok_r(NULL, " ", &saveptr))
+    {
+        char *pValue = strchr(pToken, '=');
+        if (pValue == NULL)
+        {
+            continue;
+        }
+        *pValue++ = '\0';
+
+        int iCode = atoi(pToken);
+        if (iCode != 32 && iCode != 33 && iCode != 34 && iCode != 2171)
+        {
+            continue;
+        }
+
+        unsigned char cBuf[BUFLEN_512];
+        int iLen = DhcpMgr_HexColonToBytes(pValue, cBuf, sizeof(cBuf));
+        if (iLen <= 0)
+        {
+            DHCPMGR_LOG_ERROR("%s: Invalid option 17 sub-option %d data\n", __FUNCTION__, iCode);
+            continue;
+        }
+
+        switch (iCode)
+        {
+            case 32:
+                DhcpMgr_FirstIpv6ToText(cBuf, (size_t)iLen, pDestData->cTftpServer, sizeof(pDestData->cTftpServer));
+                break;
+            case 33:
+            {
+                size_t n = ((size_t)iLen < sizeof(pDestData->cTftpFileName) - 1) ? (size_t)iLen : sizeof(pDestData->cTftpFileName) - 1;
+                memcpy(pDestData->cTftpFileName, cBuf, n);
+                pDestData->cTftpFileName[n] = '\0';
+                break;
+            }
+            case 34:
+                DhcpMgr_FirstIpv6ToText(cBuf, (size_t)iLen, pDestData->cSyslogServer, sizeof(pDestData->cSyslogServer));
+                break;
+            case 2171:
+                DhcpMgr_ParseProvServer(cBuf, (size_t)iLen, pDestData->cProvServer, sizeof(pDestData->cProvServer));
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (pSrcData->cFqdn[0] != '\0')
+    {
+        unsigned char cBuf[BUFLEN_256];
+        int iLen = DhcpMgr_HexColonToBytes(pSrcData->cFqdn, cBuf, sizeof(cBuf));
+        if (iLen > 1)
+        {
+            DhcpMgr_DecodeDnsName(&cBuf[1], (size_t)iLen - 1, pDestData->cClientFqdn, sizeof(pDestData->cClientFqdn));
+        }
+        else if (iLen < 0)
+        {
+            /* Not hex, so already text */
+            snprintf(pDestData->cClientFqdn, sizeof(pDestData->cClientFqdn), "%s", pSrcData->cFqdn);
+        }
+    }
+
+    bool bFound = (pDestData->cTftpServer[0] || pDestData->cTftpFileName[0] || pDestData->cSyslogServer[0] || pDestData->cProvServer[0] || pDestData->cClientFqdn[0]);
+    if (bFound)
+    {
+        DHCPMGR_LOG_INFO("%s: Voice info - TFTP server: %s, file: %s, syslog: %s, provisioning server: %s, client FQDN: %s\n", __FUNCTION__,
+            pDestData->cTftpServer, pDestData->cTftpFileName, pDestData->cSyslogServer, pDestData->cProvServer, pDestData->cClientFqdn);
+    }
+    return bFound;
+}
+
+/* Attach the voice data to the event object when the lease has any. */
+static void DhcpMgr_SetVoiceInfo(rbusObject_t rdata, const DHCPv6_PLUGIN_MSG *pLease)
+{
+    DHCP_MGR_VOICE_V6_MSG sVoiceInfo;
+    if (FALSE == DhcpMgr_createVoiceInfoMsg(pLease, &sVoiceInfo))
+    {
+        return;
+    }
+
+    rbusValue_t voiceInfoVal;
+    rbusValue_Init(&voiceInfoVal);
+    rbusValue_SetBytes(voiceInfoVal, (const uint8_t *)&sVoiceInfo, sizeof(sVoiceInfo));
+    rbusObject_SetValue(rdata, "VoiceInfo", voiceInfoVal);
+    rbusValue_Release(voiceInfoVal);
+}
+
 static void DhcpMgr_SetLeaseDataOnProperty(rbusProperty_t rbusProperty, const char *ifName,
                                             DHCP_MESSAGE_TYPE msgType,
                                             const void *leaseData, size_t leaseDataSize)
@@ -417,6 +730,11 @@ rbusError_t getDataHandler(rbusHandle_t rbusHandle, rbusProperty_t rbusProperty,
             memset(&leaseInfo, 0, sizeof(leaseInfo));
             DhcpMgr_createDhcpv6LeaseInfoMsg(pDhcpv6c->currentLease, &leaseInfo);
             DhcpMgr_SetLeaseDataOnProperty(rbusProperty, pDhcpv6c->Cfg.Interface, msgType, &leaseInfo, sizeof(leaseInfo));
+            rbusValue_t propValue = rbusProperty_GetValue(rbusProperty);
+            if (propValue != NULL && rbusValue_GetType(propValue) == RBUS_OBJECT)
+            {
+                DhcpMgr_SetVoiceInfo(rbusValue_GetObject(propValue), pDhcpv6c->currentLease);
+            }
         }
         else
         {
@@ -579,6 +897,7 @@ int DhcpMgr_PublishDhcpV6Event(PCOSA_DML_DHCPCV6_FULL pDhcpv6c, DHCP_MESSAGE_TYP
         rbusValue_SetBytes(leaseInfoVal, &leaseInfo, sizeof(leaseInfo));
         rbusObject_SetValue(rdata, "LeaseInfo", leaseInfoVal);
         rbusValue_Release(leaseInfoVal);
+        DhcpMgr_SetVoiceInfo(rdata, pDhcpv6c->currentLease);
 #if defined(FEATURE_MAPT) || defined(FEATURE_SUPPORT_MAPT_NAT46)
         //Update MAPT dml values 
         if(leaseInfo.maptAssigned)

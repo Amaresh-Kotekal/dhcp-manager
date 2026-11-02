@@ -46,6 +46,7 @@
 #define DHCPv6_IAPD_T1                       "PREFIX1T1"
 #define DHCPv6_IAPD_T2                       "PREFIX1T2"
 #define DHCPv6_VENDOR_SPEC                   "SRV_OPTION17"
+#define DHCPv6_OPTION_FQDN                   "SRV_OPTION39"
 #define DHCPv6_OPTION_DNS                    "SRV_OPTION23"
 #define DHCPv6_OPTION_DOMAIN                 "SRV_OPTION24"
 #define DHCPv6_OPTION_NTP                    "SRV_OPTION31"
@@ -285,6 +286,16 @@ static int get_and_fill_env_data_dhcp6(DHCPv6_PLUGIN_MSG *dhcpv6_data, char *inp
         snprintf(dhcpv6_data->vendor.Data, sizeof(dhcpv6_data->vendor.Data), "%s", env);
     }
 
+    /** Client FQDN (option 39) */
+    if ((env = getenv(DHCPv6_OPTION_FQDN)) != NULL)
+    {
+        snprintf(dhcpv6_data->cFqdn, sizeof(dhcpv6_data->cFqdn), "%s", env);
+        DHCPMGR_LOG_INFO("[%s-%d] Option 39 data is %s\n", __FUNCTION__, __LINE__, dhcpv6_data->cFqdn);
+    }
+    else
+    {
+        DHCPMGR_LOG_INFO("[%s-%d] Option 39 data is missing\n", __FUNCTION__, __LINE__);
+    }
     return 0;
 }
 

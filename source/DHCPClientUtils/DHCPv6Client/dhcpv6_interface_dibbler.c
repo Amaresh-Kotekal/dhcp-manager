@@ -179,6 +179,11 @@ static int dibbler_get_req_options(FILE * fout,  dhcp_opt_list * req_opt_list)
                 fputs(args, fout);
                 break;
 
+            case DHCPV6_OPT_39:
+                // Dibbler sends the FQDN option (and requests it) only with 'option fqdn'
+                fputs("\n\toption fqdn \n", fout);
+                break;
+
             case DHCPV6_OPT_95:
                 snprintf(args, sizeof(args), "\n\toption 00%d hex \n", opt_list->dhcp_opt);
                 fputs(args, fout);
@@ -231,7 +236,7 @@ static int dibbler_get_send_options(FILE * fout,  dhcp_opt_list * send_opt_list)
         return 0;
     }
 
-    char args [BUFLEN_512] = {0};
+    char args [BUFLEN_1024] = {0};
     //send option list
     dhcp_opt_list * opt_list = send_opt_list;
     while (opt_list)

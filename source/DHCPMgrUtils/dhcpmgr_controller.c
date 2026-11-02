@@ -326,7 +326,7 @@ static int DhcpMgr_build_dhcpv6_opt_list (PCOSA_CONTEXT_DHCPCV6_LINK_OBJECT hIns
                 else if(pSentOption->Tag == DHCPV6_OPT_17 && strlen((char *)pSentOption->Value) <= 0)
                 {
                     DHCPMGR_LOG_INFO("%s %d: DHCPv6 option 17 (Vendor-Specific Information) entry found without value. \n", __FUNCTION__, __LINE__);
-                    char optionValue[BUFLEN_256] = {0};
+                    char optionValue[BUFLEN_1024] = {0};
                     int ret = Get_DhcpV6_CustomOption17(pDhcp6c->Cfg.Interface, optionValue, sizeof(optionValue));
                     if (ret == 0)
                     {
